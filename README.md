@@ -255,6 +255,7 @@ $uvr tools/uvr5.py make-dataset -i 歌.flac -o data/raw/某人   # 分离+去混
 | `s2Gv3.pth` | 733 MB | `tools/fetch_models.py` |
 | G2PW 中文多音字模型 | 608 MB | `tools/fetch_models.py` |
 | BERT + CNHuBERT + BigVGAN | ~1.4 GB | `tools/fetch_models.py` |
+| fastText 语种检测 `lid.176.bin` | 125 MB | `tools/fetch_models.py`（MD5 校验） |
 | Qwen3-ASR-0.6B | 1.8 GB | `tools/fetch_qwen_asr.py` |
 | UVR5 权重（4 个 onnx） | ~120 MB | 首次使用自动下载 |
 | 上游仓库 `_src/` | 32 MB + 权重 | git clone |

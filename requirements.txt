@@ -8,14 +8,19 @@
 | `requirements/asr.txt` | Qwen3-ASR 自动标注（126 包） | `.venv-asr` |
 | `requirements/uvr.txt` | UVR5 人声分离（60 包，CPU torch） | `.venv-uvr` |
 
-⚠️ `tts.txt` 里的 `torch==2.11.0+cu128` / `torchaudio==2.11.0+cu128` 带 `+cu128` 本地版本号，
-PyPI 上没有，必须加 PyTorch 官方 CUDA 索引：
+⚠️ `tts.txt` 与 `asr.txt` 里的 `torch==2.11.0+cu128` / `torchaudio==2.11.0+cu128`
+带 `+cu128` 本地版本号，PyPI 上没有；且 uv 默认每个包只认第一个命中它的索引。
+所以用 uv 安装这两个清单时，**必须**同时加这两个参数：
 
 ```bash
-uv pip install -p .venv-tts/Scripts/python.exe \
+uv pip install -p .venv-tts \
     --extra-index-url https://download.pytorch.org/whl/cu128 \
+    --index-strategy unsafe-best-match \
     -r requirements/tts.txt
 ```
+
+`uvr.txt` 是纯 PyPI 的 CPU torch，无需特殊参数。
+另外：多个 `uv pip install` 不要并发跑（全局缓存锁会超时），串行即可。
 
 国内网络可用镜像（版本一致性自行核对）：
 - PyPI: `https://pypi.tuna.tsinghua.edu.cn/simple`

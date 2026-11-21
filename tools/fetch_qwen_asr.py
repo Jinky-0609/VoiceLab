@@ -4,13 +4,19 @@
 用法：
     .venv-asr\\Scripts\\python.exe tools\\fetch_qwen_asr.py              # 0.6B（默认）
     .venv-asr\\Scripts\\python.exe tools\\fetch_qwen_asr.py --size 1.7B  # 更大更准
+    .venv-asr\\Scripts\\python.exe tools\\fetch_qwen_asr.py --endpoint https://hf-mirror.com
 
-为什么不用 huggingface_hub：本机 huggingface_hub 走的 requests 缺根证书，
-访问 huggingface.co 会 SSLCertVerificationError；urllib 用 certifi 就正常。
+为什么不用 huggingface_hub：它的 requests 链路缺根证书时会
+SSLCertVerificationError；urllib + certifi 不受影响。
+
+源站：默认自动探测 —— 先试 huggingface.co 直连（境外快），
+不通或超时则切 hf-mirror.com（境内可用）。给了 --endpoint 或设了
+环境变量 HF_ENDPOINT 时直接采用，大文件失败还会自动换另一个源重试。
 """
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 import urllib.request
@@ -27,6 +33,33 @@ SMALL_FILES = [
     "tokenizer_config.json", "chat_template.json", "vocab.json", "merges.txt",
 ]
 BIG_FILE = "model.safetensors"
+OFFICIAL = "https://huggingface.co"
+MIRROR = "https://hf-mirror.com"
+
+
+def resolve_endpoint(explicit: str | None = None) -> str:
+    """确定首选源站：--endpoint > 环境变量 HF_ENDPOINT > 自动探测。"""
+    for src, label in ((explicit, "--endpoint"),
+                       (os.environ.get("HF_ENDPOINT"), "HF_ENDPOINT")):
+        if src:
+            src = src.rstrip("/")
+            print(f"源站: {src}  (来自 {label})", flush=True)
+            return src
+
+    probe = f"{OFFICIAL}/{REPOS['0.6B']}/resolve/main/{SMALL_FILES[0]}"
+    print("探测 huggingface.co 直连 ...", end="", flush=True)
+    try:
+        req = urllib.request.Request(probe, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=8) as r:
+            if r.status == 200:
+                r.read(64)
+                print(" 可用", flush=True)
+                return OFFICIAL
+            print(f" HTTP {r.status}", end="", flush=True)
+    except Exception as e:
+        print(f" {type(e).__name__}", end="", flush=True)
+    print(f"，改用镜像 {MIRROR}", flush=True)
+    return MIRROR
 
 
 def human(n: float) -> str:
@@ -71,6 +104,7 @@ def download(url: str, dst: Path, label: str = "") -> bool:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--size", default="0.6B", choices=list(REPOS), help="模型规格")
+    ap.add_argument("--endpoint", help="强制指定 HF 源站（默认自动探测，失败自动换源）")
     args = ap.parse_args()
 
     repo = REPOS[args.size]
@@ -80,7 +114,9 @@ def main() -> int:
     print(f"目标: {dst_dir}")
     print(f"仓库: {repo}\n")
 
-    base = f"https://huggingface.co/{repo}/resolve/main/"
+    first = resolve_endpoint(args.endpoint)
+    endpoints = [first] + [e for e in (OFFICIAL, MIRROR) if e != first]
+    base = f"{first}/{repo}/resolve/main/"
     ok = True
     for fn in SMALL_FILES:
         target = dst_dir / fn
@@ -90,11 +126,23 @@ def main() -> int:
             print(f"  (警告) {fn} 下载失败，通常不影响推理")
 
     big = dst_dir / BIG_FILE
-    need = not (big.is_file() and big.stat().st_size > 100 * 2**20)
+    # 完整性按体积判定：0.6B 真实 1.79 GB / 1.7B 更大。
+    # 只判 ">100MB" 会把下载中断留下的半截文件当成已就绪（实测踩过 184MB 截断）。
+    min_big = {"0.6B": int(1.6 * 2**30), "1.7B": int(3.2 * 2**30)}[args.size]
+    if big.is_file() and big.stat().st_size < min_big:
+        print(f"  {BIG_FILE} 残缺（{big.stat().st_size/2**20:.0f} MB < 预期 "
+              f"{min_big/2**20:.0f} MB），断点续传", flush=True)
+    need = not (big.is_file() and big.stat().st_size >= min_big)
     if need:
-        if not download(base + BIG_FILE, big):
+        got = False
+        for ep in endpoints:
+            if download(f"{ep}/{repo}/resolve/main/{BIG_FILE}", big):
+                got = True
+                break
+            print(f"  !! {ep} 取 {BIG_FILE} 失败，尝试下一个源", flush=True)
+        if not got:
             ok = False
-            print("  !! 权重下载失败", flush=True)
+            print("  !! 权重下载失败（两个源都试过）", flush=True)
     else:
         print(f"  {BIG_FILE} 已存在  {human(big.stat().st_size)}")
 
