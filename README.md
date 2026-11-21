@@ -75,6 +75,21 @@ VoiceLab/
   -p myvoice -t "你好" -l 中文 -o out/x.wav
 ```
 
+### 图形界面（推荐日常使用）
+
+```bash
+.venv-tts/Scripts/python.exe tools/webui.py            # 自动开浏览器，http://127.0.0.1:8765
+.venv-tts/Scripts/python.exe tools/webui.py --port 9000 --no-browser
+```
+
+CLI 每次合成都要重新加载模型（25~60 秒），`webui.py` 把引擎常驻，**首句之后每次只要几秒**。
+界面提供：音色/语言下拉（自动禁用权重缺失的档案）、跨语言参考提醒、
+语速/采样步数/top_p 等高级参数、临时参考音频覆盖、历史列表（试听/保存/删除/失败重试）。
+合成结果同样过语义坍缩守卫，被拦下的乱音不落盘。
+
+只监听 `127.0.0.1`；要局域网共享用 `--host 0.0.0.0`（**无鉴权，慎用**）。
+音频与历史落在 `out/web/`（不入库）。
+
 ### 批量合成
 `lines.jsonl`：
 ```json
