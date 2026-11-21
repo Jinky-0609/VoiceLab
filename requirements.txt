@@ -1,0 +1,25 @@
+# VoiceLab 依赖清单
+
+三个虚拟环境各有一份**精确锁定**的清单（`uv pip freeze` 导出，可直接复现同一环境）：
+
+| 文件 | 用于 | 虚拟环境 |
+|---|---|---|
+| `requirements/tts.txt` | 推理 + 训练（124 包） | `.venv-tts` |
+| `requirements/asr.txt` | Qwen3-ASR 自动标注（126 包） | `.venv-asr` |
+| `requirements/uvr.txt` | UVR5 人声分离（60 包，CPU torch） | `.venv-uvr` |
+
+⚠️ `tts.txt` 里的 `torch==2.11.0+cu128` / `torchaudio==2.11.0+cu128` 带 `+cu128` 本地版本号，
+PyPI 上没有，必须加 PyTorch 官方 CUDA 索引：
+
+```bash
+uv pip install -p .venv-tts/Scripts/python.exe \
+    --extra-index-url https://download.pytorch.org/whl/cu128 \
+    -r requirements/tts.txt
+```
+
+国内网络可用镜像（版本一致性自行核对）：
+- PyPI: `https://pypi.tuna.tsinghua.edu.cn/simple`
+- HuggingFace: `export HF_ENDPOINT=https://hf-mirror.com`
+- GitHub raw: 走 `ghproxy.net` 前缀
+
+完整重建步骤见 `docs/环境重建.md`。

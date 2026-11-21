@@ -1,0 +1,36 @@
+NOTICE — Third-party components and what this repository does NOT ship
+=======================================================================
+
+This repository ships VoiceLab's own Python code, config templates and docs.
+It deliberately does NOT contain any of the following. Every one of them is
+fetched by the user on first setup (see docs/环境重建.md) and remains under
+its own license:
+
+  * GPT-SoVITS (https://github.com/RVC-Boss/GPT-SoVITS) — MIT License
+    Copyright (c) 2024 RVC-Boss.
+    VoiceLab drives it as a vendored checkout at `_src/GPT-SoVITS-main/`
+    and does not fork or relicense it. Its pretrained checkpoints
+    (s1v3.ckpt, s2Gv3.pth, chinese-roberta-wwm-ext-large,
+    chinese-hubert-base, BigVGAN v2, G2PW) are downloaded separately and
+    are NOT part of this repository.
+
+  * Qwen3-ASR (https://github.com/QwenLM/Qwen3-ASR) — used for automatic
+    transcript annotation. Model weights are downloaded by
+    `tools/fetch_qwen_asr.py` into `models/asr/`. Check the upstream
+    repository for the applicable terms before use.
+
+  * Ultimate Vocal Remover models (Kim_Vocal_2, UVR-MDX-NET-Voc_FT,
+    UVR-MDX-NET-Inst_HQ_3, Reverb_HQ_By_FoxJoy) plus the
+    `audio-separator` package. Weight files live in `uvr5/weights/` after
+    you download them; they are NOT part of this repository.
+
+  * nltk corpora: `cmudict`, `averaged_perceptron_tagger_eng`.
+    `runtime/nltk_data/` is provided as a convenience mirror of publicly
+    distributed nltk data under nltk's own terms; delete it and re-download
+    with `nltk.download(...)` if you prefer.
+
+No voice data, no trained voice models, and no reference audio are included.
+`config.json`, `data/`, `models/`, `out/`, `logs/`, `uploads/`, `_weight_backup/`
+and the `.venv-*` environments are all excluded via `.gitignore` — they hold
+personal audio, voice-identity data, trained weights and machine-bound
+environments.

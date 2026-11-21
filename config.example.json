@@ -1,0 +1,42 @@
+{
+  "_说明": "VoiceLab 配置模板。复制为 config.json 后按需添加自己的音色档案。路径一律相对项目根（本文件所在目录），所以整个目录可任意移动、改名、换机器。",
+  "python": ".venv-tts/Scripts/python.exe",
+  "profiles": {
+    "zeroshot": {
+      "desc": "方案2：v3 纯预训练对，音色 100% 由参考音频决定（克隆任意人）",
+      "gpt": "models/pretrained/s1v3.ckpt",
+      "sovits": "models/pretrained/s2Gv3.pth",
+      "ref_audio": "data/refs/default.wav",
+      "ref_text": "data/refs/default.txt",
+      "ref_lang": "中文"
+    }
+  },
+  "_如何添加微调音色": "跑通 tools/train_pipeline.py 后，把 s1/s2 产物路径写成新的 profile，例如 \"xiaoming\": {\"gpt\": \"models/voices/xiaoming/s1/xiaoming-e25.ckpt\", \"sovits\": \"models/voices/xiaoming/s2/xiaoming_e15_s720_l32.pth\", \"ref_audio\": \"data/refs/xiaoming_ref.wav\", \"ref_text\": \"data/refs/xiaoming_ref.txt\", \"ref_lang\": \"中文\"}",
+  "languages": [
+    "中文",
+    "英文",
+    "日文",
+    "粤语",
+    "韩文",
+    "中英混合",
+    "日英混合",
+    "粤英混合",
+    "韩英混合",
+    "多语种混合",
+    "多语种混合(粤语)"
+  ],
+  "defaults": {
+    "how_to_cut": "不切",
+    "top_k": 20,
+    "top_p": 0.6,
+    "temperature": 0.6,
+    "speed": 1.0,
+    "sample_steps": 16,
+    "pause_second": 0.3
+  },
+  "pretrained_root": "_src/GPT-SoVITS-main/GPT_SoVITS/pretrained_models",
+  "runtime": {
+    "nltk_data": "runtime/nltk_data",
+    "hf_home": "runtime/hf"
+  }
+}

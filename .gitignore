@@ -1,0 +1,62 @@
+# VoiceLab —— 发布白名单式忽略
+# 原则：模型权重、真人音频、机器绑定的虚拟环境一律不入库。
+#       需要"排除目录但保留其中某个文件"时，用 `dir/*` + `!dir/file`，
+#       绝不用 `dir/`（那样 git 无法进入目录，白名单规则会静默失效）。
+
+# ---------- 权重与模型（用 tools/fetch_*.py 下载，见 docs/环境重建.md）----------
+models/
+_src/
+_weight_backup/
+uvr5/
+GPT_SoVITS/
+train/libs/
+
+# ---------- 隐私：真人音频、数据集、训练产物、合成结果 ----------
+config.json
+data/*
+!data/refs
+data/refs/*
+!data/refs/README.md
+out/*
+!out/.gitkeep
+logs/
+uploads/
+
+# ---------- Python 虚拟环境与缓存（绑定本机绝对路径，换机器必须重建）----------
+.venv-*/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# ---------- 运行时缓存（nltk 数据随包发布，其余都是可再生缓存）----------
+runtime/*
+!runtime/nltk_data
+runtime/nltk_data/*
+!runtime/nltk_data/corpora
+!runtime/nltk_data/taggers
+runtime/nltk_data/corpora/*
+!runtime/nltk_data/corpora/cmudict.zip
+runtime/nltk_data/taggers/*
+!runtime/nltk_data/taggers/averaged_perceptron_tagger_eng.zip
+
+# ---------- 历史私人文档与一次性脚本（描述旧架构 / 含本机临时路径）----------
+交接文档.md
+_local/
+vram_budget.txt
+*.bak
+*.bak*
+tools/_migrate_*.py
+tools/_probe_*
+
+# ---------- 本机专属工具（依赖桌面快捷方式与私人音色档案）----------
+tools/*.ps1
+tools/*.cmd
+
+# ---------- 系统杂项 ----------
+.tmp/
+*.tmp
+.DS_Store
+Thumbs.db
+desktop.ini
+.env
