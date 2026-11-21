@@ -13,8 +13,8 @@ VoiceLab —— 独立音色实验室 CLI
 
 用法示例：
   python voicelab.py list
-  .venv-tts/Scripts/python.exe tools/voicelab.py speak -p zhongcheng -t "你好，这是测试。" -l 中文
-  .venv-tts/Scripts/python.exe tools/voicelab.py batch -p zhongcheng -i lines.jsonl -d out/batch01
+  .venv-tts/Scripts/python.exe tools/voicelab.py speak -p myvoice -t "你好，这是测试。" -l 中文
+  .venv-tts/Scripts/python.exe tools/voicelab.py batch -p myvoice -i lines.jsonl -d out/batch01
 """
 from __future__ import annotations
 
