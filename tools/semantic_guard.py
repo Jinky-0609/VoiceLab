@@ -36,6 +36,7 @@ ACORR_MIN_DUR = 2.0   # 秒，短于此不做循环判定（统计不可靠）
 DRONE_DUR = 12.0      # 秒
 DRONE_SIL = 0.03      # 静音帧占比上限
 SATURATED_MEAN = 0.5  # mean|abs| 上限：正常 ~0.04，削顶方波 ~0.89
+NEAR_SILENT_MEAN = 0.004  # mean|abs| 下限：正常语音 ≥0.02；英文缺 nltk 时实测 0.00078
 
 
 class SemanticGenerationError(RuntimeError):
@@ -74,6 +75,12 @@ def analyze(audio, sr: int, nchars: int) -> list[str]:
     reasons: list[str] = []
     if float(np.abs(x).mean()) > SATURATED_MEAN:
         reasons.append("saturated_audio")
+
+    # 近静音：英文前端缺 nltk 数据时，整条链路零异常但产出哑音频
+    # （实测 0.84s / peak 0.0094 / mean|abs| 0.00078）。这类结果必须拦下。
+    mean_abs = float(np.abs(x).mean())
+    if mean_abs < NEAR_SILENT_MEAN:
+        reasons.append("near_silent")
 
     dur = len(x) / float(sr)
 

@@ -266,6 +266,30 @@ $uvr tools/uvr5.py make-dataset -i 歌.flac -o data/raw/某人   # 分离+去混
 多语种混合 / 多语种混合(粤语)
 ```
 
+每种语言依赖不同的前端库，缺了会失败。**先跑一次自检**：
+
+```bash
+.venv-tts/Scripts/python.exe tools/check_langs.py
+```
+
+它会逐语言告诉你可用性、缺哪个包、怎么装。当前状态（2026-11-23 实测全部可用）：
+
+| 语言 | 依赖 | 缺了会怎样 |
+|---|---|---|
+| 中文 | `jieba` / `pypinyin` | 报错 |
+| 英文 | nltk `averaged_perceptron_tagger` + `cmudict` | ⚠️ **不报错，生成 0.84 秒静音音频** |
+| 日文 | `pyopenjtalk` | 报错 |
+| 粤语 | `ToJyutping` | `No module named 'ToJyutping'` |
+| 韩文 | `jamo` / `ko_pron` / `g2pk2` / **`eunjeon`** | 逐级报缺包；Windows 上最后必须装 `eunjeon`（mecab 的替代） |
+
+**英文那条最危险**——整条链路零异常，只是输出是哑的。所以：
+
+1. `tools/nltk_fix.py` 会自动把 nltk 的 zip 解压成目录（nltk 3.10 不认 zip），
+   并建立 `averaged_perceptron_tagger` 旧名别名（上游 `pos_tag()` 找的是旧名）。
+   这个过程在 `runtime_paths.ensure_env()` 里幂等执行，无需手动干预。
+2. 守卫新增 `near_silent` 规则（`mean|abs| < 0.004`）：哑音频会被拦下并重试，
+   不会静默写盘。正常语音该值 ≥0.02，实测五语种 0.066~0.099。
+
 ---
 
 ## 磁盘占用（首次部署需下载的部分）

@@ -119,6 +119,22 @@ def resolve_profile(cfg: dict, args) -> dict:
             sys.exit(f"[FATAL] {k} 权重不存在: {p[k]}")
     if not Path(p["ref_audio"]).is_file():
         sys.exit(f"[FATAL] 参考音频不存在: {p['ref_audio']}")
+
+    # 情绪参考：解析成绝对路径，作为上游 aux 参考参与韵律融合
+    p["aux_ref_audio_paths"] = []
+    names = getattr(args, "emotion", None) or []
+    if names:
+        import emotions as emo
+        got = emo.resolve(args.profile, names)
+        found = {g["name"] for g in got}
+        missing = [n for n in names if n not in found]
+        if missing:
+            print(f"[情绪] 未登记或文件缺失，已忽略: {', '.join(missing)}\n"
+                  f"       可用: {', '.join(emo.load(args.profile).keys()) or '（无，先用 tools/emotions.py 登记）'}",
+                  flush=True)
+        p["aux_ref_audio_paths"] = [g["audio"] for g in got]
+        if got:
+            print(f"[情绪] 融合参考: {', '.join(g['name'] for g in got)}", flush=True)
     return p
 
 
@@ -163,6 +179,7 @@ def synth(cfg: dict, prof: dict, text: str, lang: str, out_path: Path, args) -> 
             pause_second=d.get("pause_second", 0.3),
             if_sr=bool(args.if_sr),
             seed=seed,
+            aux_ref_audio_paths=prof.get("aux_ref_audio_paths") or [],
         )
         dt = time.perf_counter() - t0
         audio = np.asarray(audio, dtype=np.float32)
@@ -266,6 +283,10 @@ def main() -> int:
         p.add_argument("--how-to-cut", help="切句方式")
         p.add_argument("--if-sr", action="store_true", help="启用超分辨率（仅 v3）")
         p.add_argument("--seed", type=int, help="随机种子（默认每次随机；坍缩重试时会另取种子）")
+        p.add_argument("--emotion", action="append", default=None, metavar="名称",
+                       help="情绪参考名（可重复，如 --emotion 开心 --emotion 激动）。"
+                            "用 tools/emotions.py 登记；作为上游 aux 参考参与韵律融合。"
+                            "v3 没有 emotion 参数，情绪完全由参考音频承载。")
         p.add_argument("--guard-attempts", type=int, default=2, help="语义守卫重试次数（默认 2）")
         p.add_argument("--no-guard", action="store_true", help="关闭语义坍缩守卫（仅排障用）")
 

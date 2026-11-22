@@ -62,6 +62,14 @@ def ensure_env() -> None:
         parts.append(str(home_data))
     os.environ["NLTK_DATA"] = os.pathsep.join(parts)
 
+    # nltk 3.10 不认 zip 包，且上游 pos_tag 要旧资源名 —— 缺了会静默产出空音频。
+    # 这里做一次幂等自修复（解压 + 建别名），失败也不阻断启动。
+    try:
+        import nltk_fix
+        nltk_fix.repair(NLTK_DIR)
+    except Exception as e:
+        print(f"[nltk] 自修复跳过: {type(e).__name__}: {e}", flush=True)
+
     os.environ.setdefault("HF_HOME", str(HF_DIR))
     os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
     os.environ.setdefault("XDG_CACHE_HOME", str(RUNTIME / "cache"))

@@ -240,11 +240,26 @@ class TTSInferencer:
         if_sr: bool = False,
         repetition_penalty: float = 1.35,
         seed: int = -1,
+        aux_ref_audio_paths: list | None = None,
         **kwargs,
     ):
         ref_audio_path = str(Path(ref_audio_path).resolve())
         if not Path(ref_audio_path).is_file():
             raise FileNotFoundError(f"参考音频不存在: {ref_audio_path}")
+
+        # 情绪参考：作为上游的 aux 参考参与音色/韵律融合（TTS.py:1149, 1275-1286）。
+        # 上游注释写的是 multi-speaker tone fusion，但机制就是「多段参考特征一起融合」，
+        # 给同一人的不同情绪片段即可迁移韵律——这是 v3 唯一的情绪通道。
+        aux = []
+        for p in (aux_ref_audio_paths or []):
+            try:
+                rp = Path(p).resolve()
+                if rp.is_file():
+                    aux.append(str(rp))
+                else:
+                    print(f"[情绪] 参考不存在，跳过: {rp}", flush=True)
+            except OSError:
+                continue
 
         inputs = {
             "text": text,
@@ -264,6 +279,7 @@ class TTSInferencer:
             "repetition_penalty": float(repetition_penalty),
             "sample_steps": int(sample_steps),
             "super_sampling": bool(if_sr),
+            "aux_ref_audio_paths": aux,
         }
 
         # run() 内部也可能用到 cwd 相对路径

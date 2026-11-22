@@ -49,22 +49,42 @@ if p.is_file():
     r = sg.analyze(a, sr, nchars=17)
     expect("干净音频 0 违规", r == [], str(r))
 
-print("[3] 历史参考音频 80 个不能误伤（只测规则2/3：给足长度预算）")
+print("[3] 正常语音不能被误伤（参考音频 + 已知正常的合成产物）")
+# 只取真实可用的样本：data/refs 下的参考音频，加上明确验证过的合成结果。
+# 不扫全部 out/*.wav —— 那里混着历史垃圾（如 0.54s 近静音文件），
+# 拿它们当"正常样本"会让测试本身失真。
 n_bad = 0
 worst = ""
-for f in sorted(glob.glob(str(LAB / "data" / "refs" / "*.wav")) +
-                glob.glob(str(LAB / "out" / "*.wav"))):
-    if "noguard" in f or "guard_pass" in f:
+positives = sorted(glob.glob(str(LAB / "data" / "refs" / "*.wav")))
+positives += [str(LAB / "out" / f) for f in
+              ("_lang_中文.wav", "_en_fixed.wav", "_lang_日文.wav",
+               "_lang_粤语.wav", "_ko_test.wav")]
+n_checked = 0
+for f in positives:
+    if not Path(f).is_file():
         continue
     try:
         a, sr = load(f)
     except Exception:
         continue
+    n_checked += 1
     r = sg.analyze(a, sr, nchars=max(4, int(len(a) / sr)))  # 预算 0.8s/字，宽松
     if r:
         n_bad += 1
         worst = f"{Path(f).name}: {r}"
-expect("误伤数 == 0", n_bad == 0, worst)
+expect("误伤数 == 0", n_bad == 0, f"检查 {n_checked} 个，{worst}")
+
+print("[3b] 近静音必须被拦（英文缺 nltk 时的静默失败形态）")
+sil_path = LAB / "out" / "_lang_英文.wav"
+if sil_path.is_file():
+    a, sr = load(sil_path)
+    if float(np.abs(a).mean()) < sg.NEAR_SILENT_MEAN:
+        expect("哑音频 -> near_silent", "near_silent" in sg.analyze(a, sr, 20),
+               f"mean|abs|={np.abs(a).mean():.5f}")
+    else:
+        print("  (该文件已是正常音频，跳过)")
+quiet = np.zeros(24000 * 2, dtype=np.float32)
+expect("全零 -> near_silent", "near_silent" in sg.analyze(quiet, 24000, 10))
 
 print("[4] 合成用例：错误量纲 / 饱和 / 完美循环")
 x = (np.random.RandomState(0).randn(48000) * 8000).astype(np.int16)  # 忘转 float
