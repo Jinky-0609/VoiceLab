@@ -19,6 +19,8 @@ data/refs/*
 !data/refs/README.md
 out/*
 !out/.gitkeep
+# demo/ 是用真人音色合成的示例，公开前必须取得该人同意；默认不入库防止误提交
+demo/
 logs/
 uploads/
 
