@@ -33,7 +33,7 @@ import config_io          # noqa: E402
 import runtime_paths      # noqa: E402
 import semantic_guard     # noqa: E402
 
-from fastapi import FastAPI, HTTPException  # noqa: E402
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile  # noqa: E402
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse  # noqa: E402
 
 WEB_DIR = LAB / "out" / "web"
@@ -127,9 +127,14 @@ def _profile_status(cfg: dict, name: str) -> dict:
             missing.append("参考文本文件缺失")   # 长路径才当文件看待
     if str(rt or "").strip().startswith("（"):
         missing.append("参考文本是占位符，需填逐字内容")
+    reason = "、".join(missing)
+    # 零样本缺素材时给可操作的引导，而不是干巴巴一句"参考音频缺失"
+    if missing and "pretrained" in str(p.get("gpt", "")).lower():
+        reason = ("零样本需要一段参考音频：把自己 3~10 秒的干声拖进"
+                  "「高级 → 参考音频」，或放到 data/refs/my_ref.wav 并配同名 .txt")
     return {
         "ok": not missing,
-        "reason": "、".join(missing) if missing else "",
+        "reason": reason,
         "ref_lang": p.get("ref_lang", ""),
         "desc": p.get("desc", ""),
     }
@@ -155,6 +160,7 @@ def api_config() -> dict:
         "defaults": cfg.get("defaults", {}),
         "engine": cur,
         "engine_loaded": _state["engine_loaded"],
+        "loading": bool(_state["loading"]),   # 前端轮询用：预热/加载是否进行中
         "busy": _state["busy"],
         "queue": list(_state["queue"]),
     }
@@ -167,7 +173,12 @@ def api_history() -> JSONResponse:
 
 @app.post("/api/preload")
 def api_preload(profile: str) -> dict:
-    """提前把模型加载好——第一次最痛，之后每次秒级。"""
+    """提前把模型加载好——第一次最痛，之后每次秒级。
+
+    注意执行顺序：必须在**返回前**把 _state["loading"] 置 True，
+    否则前端立刻轮询时会看到 loading=False 并误判「已经就绪」，
+    造成「点了预热却毫无作用」的观感（真实 bug，已修）。
+    """
     cfg = config_io.load()
     if profile not in cfg["profiles"]:
         raise HTTPException(404, "未知音色")
@@ -179,8 +190,9 @@ def api_preload(profile: str) -> dict:
         if not f or not Path(f).is_file():
             raise HTTPException(400, f"{k} 权重不存在")
 
+    _state["loading"] = True      # 先置位，再起线程（见上面注释）
+
     def worker():
-        _state["loading"] = True
         try:
             with _lock:
                 eng = _get_engine(cfg, str(runtime_paths.resolve(p["gpt"])),
@@ -194,6 +206,7 @@ def api_preload(profile: str) -> dict:
                 _state["engine_loaded"] = True
         except Exception as e:
             _state["engine_info"] = {"error": f"{type(e).__name__}: {str(e)[:200]}"}
+            _state["engine_loaded"] = False
         finally:
             _state["loading"] = False
 
@@ -351,6 +364,82 @@ def audio(fname: str):
         raise HTTPException(404, "文件不存在")
     return FileResponse(str(p), media_type="audio/wav",
                         headers={"Accept-Ranges": "bytes"})
+
+
+REFS_DIR = LAB / "data" / "refs"
+REF_EXT = {".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma", ".mp4"}
+REF_MAX = 60 * 2**20          # 参考音频 60MB 足够（几秒到几分钟）
+
+
+@app.post("/api/ref/upload")
+async def ref_upload(file: UploadFile = File(...),
+                     lang: str = Form("中文"),
+                     text: str = Form("")) -> dict:
+    """上传零样本参考音频。
+
+    m4a/mp3/aac 等 soundfile 读不了的格式，先用 ffmpeg 转成 24k 单声道 wav。
+    （libsndfile 不支持 AAC，这是用户实际踩过的坑。）
+    """
+    suffix = Path(file.filename or "ref.wav").suffix.lower()
+    if suffix not in REF_EXT:
+        raise HTTPException(400, f"不支持的格式 {suffix}；可用："
+                                 f"{', '.join(sorted(REF_EXT))}")
+    REFS_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    raw = REFS_DIR / f"upload_{stamp}{suffix}"
+    size = 0
+    with open(raw, "wb") as f:
+        while True:
+            chunk = await file.read(1 << 20)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > REF_MAX:
+                f.close()
+                raw.unlink(missing_ok=True)
+                raise HTTPException(413, "文件超过 60MB，参考音频不需要这么大")
+            f.write(chunk)
+    if size < 1024:
+        raw.unlink(missing_ok=True)
+        raise HTTPException(400, "文件太小，可能上传失败")
+
+    dest = raw if suffix == ".wav" else REFS_DIR / f"upload_{stamp}.wav"
+    converted = False
+    if suffix != ".wav":
+        try:
+            import video2audio
+            video2audio.extract_one(raw, dest, sr=24000, mono=True)
+            converted = True
+            raw.unlink(missing_ok=True)
+        except Exception as e:
+            raw.unlink(missing_ok=True)
+            raise HTTPException(500, f"转码失败（{suffix} -> wav）：{e}")
+
+    # 读规格，给前端展示；顺便校验时长是否适合做参考
+    try:
+        import soundfile as sf
+        info = sf.info(str(dest))
+        dur = info.duration
+        sr = info.samplerate
+    except Exception as e:
+        raise HTTPException(500, f"生成的 wav 读不了：{e}")
+
+    warn = ""
+    if dur < 2.5:
+        warn = f"只有 {dur:.1f}s，太短会让音色不稳（建议 3~10s）"
+    elif dur > 20:
+        warn = f"有 {dur:.0f}s，偏长会稀释特征（建议 3~10s）"
+
+    txt_path = dest.with_suffix(".txt")
+    if text.strip():
+        txt_path.write_text(text.strip(), encoding="utf-8")
+
+    return {
+        "audio": str(dest.relative_to(LAB)).replace("\\", "/"),
+        "text": str(txt_path.relative_to(LAB)).replace("\\", "/") if text.strip() else "",
+        "duration": round(dur, 2), "sr": sr,
+        "converted": converted, "from": suffix, "warning": warn,
+    }
 
 
 @app.delete("/api/history/{jid}")

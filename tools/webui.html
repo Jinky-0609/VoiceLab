@@ -289,6 +289,18 @@
   .msg{font-size:13.5px;line-height:1.55;color:var(--ios-red);margin-bottom:9px;
        word-break:break-word;white-space:pre-line}
 
+  /* 参考音频拖拽区 */
+  .ref-drop{display:flex;gap:8px;align-items:center}
+  .ref-drop input{flex:1;min-width:0}
+  .ref-drop.over input{
+    background:rgba(0,122,255,.09);border-color:var(--ios-blue);
+    box-shadow:0 0 0 3.5px rgba(0,122,255,.12);
+  }
+  .ref-info{font-size:12.5px;color:var(--muted);margin-top:6px;line-height:1.5;min-height:1em}
+  .ref-info.ok{color:var(--ios-green)}
+  .ref-info.warn{color:var(--ios-orange)}
+  .ref-info.err{color:var(--ios-red)}
+
   /* ---------- 训练面板 ---------- */
   .pane{display:none}
   .pane.on{display:block}
@@ -587,7 +599,10 @@
       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" style="flex:none;margin-top:2px">
         <path d="M8 1.6 15 14H1z"/><path d="M8 6v3.4M8 11.4v.1" stroke-linecap="round"/>
       </svg>
-      <span id="langWarnText"></span>
+      <span id="langWarnText" style="flex:1"></span>
+      <button id="langWarnClose" title="知道了，不再提示"
+              style="background:transparent;border:0;cursor:pointer;color:inherit;
+                     opacity:.6;padding:0 2px;font-size:14px;line-height:1;flex:none">✕</button>
     </div>
 
     <div class="adv" id="adv">
@@ -608,8 +623,15 @@
           </select></div>
         <div class="field"><label for="guard_attempts">坍缩重试次数</label>
           <input type="number" id="guard_attempts" step="1" min="1" max="5"></div>
-        <div class="field"><label for="ref_audio">临时参考音频<span style="color:var(--dim)"> 可填路径</span></label>
-          <input type="text" id="ref_audio" placeholder="data/refs/my.wav"></div>
+        <div class="field" style="grid-column:1/-1">
+          <label>参考音频<span style="color:var(--dim)"> · 可拖入文件，或填路径</span></label>
+          <div class="ref-drop" id="refDrop">
+            <input type="text" id="ref_audio" placeholder="data/refs/my.wav —— 也可把音频文件拖到这里">
+            <button class="btn sm" id="refPick" type="button">选择文件</button>
+          </div>
+          <input type="file" id="refFile" accept="audio/*,.m4a,.aac,.opus,.wma" hidden>
+          <div class="ref-info" id="refInfo"></div>
+        </div>
         <div class="field"><label for="ref_text">临时参考文本<span style="color:var(--dim)"> 逐字</span></label>
           <input type="text" id="ref_text" placeholder="音频里说的每个字"></div>
         <div class="field"><label for="ref_lang">参考音频语言</label>
@@ -892,16 +914,21 @@ function paintProfileHint(){
   else if(!$("#text").value.trim()) go.title = "请先输入文本";
   else go.title = "Ctrl + Enter";
 
-  // 跨语言提醒：参考语言与目标语言不一致（实测为概率性坍缩，故只提示不阻断）
+  // 跨语言提醒：只在**用户主动把目标语言切成与参考不一致**时提示。
+  // 不再常驻——音色档案里参考是哪种语言是它自己的事，一进来就飘条警告
+  // 反而像出了问题（用户已经反馈过这一点）。
   const refLang = ($("#ref_lang").value||"") || (p && p.ref_lang) || "";
   const tgt = $("#lang").value;
-  const w=$("#langWarn");
-  if(refLang && tgt && refLang!==tgt && !$("#no_guard").checked){
+  const w = $("#langWarn");
+  const mismatch = !!(refLang && tgt && refLang !== tgt);
+  if (mismatch && !state.langDismissed && !$("#no_guard").checked) {
     $("#langWarnText").innerHTML =
       `参考音频是<b>${esc(refLang)}</b>，目标是<b>${esc(tgt)}</b>。跨语言会<b>概率性</b>触发语义坍缩（乱音），`
       + `守卫会拦下但白跑一次。建议换用同语言的参考音频。`;
     w.classList.add("on");
-  } else w.classList.remove("on");
+  } else {
+    w.classList.remove("on");
+  }
 }
 
 /* ---------------- 文本区 ---------------- */
@@ -1115,8 +1142,15 @@ $("#text").addEventListener("input", syncText);
 $("#text").addEventListener("keydown", e=>{
   if((e.ctrlKey||e.metaKey)&&e.key==="Enter"){ e.preventDefault(); speak(); }
 });
-$("#profile").addEventListener("change", ()=>{ paintProfileHint(); saveDraft(); });
-["lang","ref_lang","no_guard"].forEach(id=>$("#"+id).addEventListener("change", ()=>{paintProfileHint();saveDraft();}));
+$("#profile").addEventListener("change", ()=>{
+  state.langDismissed = false;   // 换音色视野清零
+  paintProfileHint(); saveDraft();
+});
+["lang","ref_lang","no_guard"].forEach(id=>$("#"+id).addEventListener("change", ()=>{
+  // 用户刚动过语言选择，重新允许提示（否则一次提示后就再也不出现）
+  state.langDismissed = false;
+  paintProfileHint(); saveDraft();
+}));
 document.querySelectorAll(".adv input,.adv select").forEach(el=>el.addEventListener("change", saveDraft));
 $("#clearBtn").addEventListener("click", ()=>{ $("#text").value=""; syncText(); $("#text").focus(); });
 $("#advBtn").addEventListener("click", ()=>{
@@ -1126,6 +1160,10 @@ $("#advBtn").addEventListener("click", ()=>{
   $("#advLabel").textContent = state.advOpen?"收起":"高级";
 });
 $("#goBtn").addEventListener("click", speak);
+$("#langWarnClose").addEventListener("click", ()=>{
+  state.langDismissed = true;
+  document.getElementById("langWarn").classList.remove("on");
+});
 $("#pauseAll").addEventListener("click", ()=>{ document.querySelectorAll("audio").forEach(a=>a.pause()); });
 $("#warmBtn").addEventListener("click", async ()=>{
   const p=$("#profile").value; if(!p) return;
@@ -1140,6 +1178,56 @@ $("#warmBtn").addEventListener("click", async ()=>{
         else toast("引擎就绪，之后每次只要几秒","ok"); } }catch(e){}
   },1500);
 });
+
+/* ---------------- 参考音频上传（零样本） ---------------- */
+(function(){
+  const drop = document.getElementById("refDrop");
+  const pick = document.getElementById("refPick");
+  const fileInput = document.getElementById("refFile");
+  const pathInput = document.getElementById("ref_audio");
+  const info = document.getElementById("refInfo");
+
+  function say(msg, cls){
+    info.textContent = msg || "";
+    info.className = "ref-info" + (cls ? " " + cls : "");
+  }
+
+  async function upload(f){
+    say("上传中…");
+    const fd = new FormData();
+    fd.append("file", f);
+    fd.append("lang", document.getElementById("ref_lang").value || "中文");
+    fd.append("text", "");
+    try{
+      const r = await fetch("/api/ref/upload", {method:"POST", body:fd});
+      const d = await r.json();
+      if(!r.ok) throw new Error(d.detail || "上传失败");
+      pathInput.value = d.audio;
+      const bits = [`${d.duration}s`, `${d.sr}Hz`];
+      if(d.converted) bits.push(`已从 ${d.from} 转 wav`);
+      say(bits.join(" · ") + (d.warning ? " —— " + d.warning : ""),
+          d.warning ? "warn" : "ok");
+      saveDraft && saveDraft();
+    }catch(e){
+      say("失败：" + e.message, "err");
+    }
+  }
+
+  pick.onclick = e => { e.preventDefault(); fileInput.click(); };
+  fileInput.onchange = () => {
+    if(fileInput.files.length) upload(fileInput.files[0]);
+    fileInput.value = "";
+  };
+
+  ["dragenter","dragover"].forEach(ev =>
+    drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave","drop"].forEach(ev =>
+    drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+  drop.addEventListener("drop", e => {
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if(f) upload(f);
+  });
+})();
 
 /* ---------------- 训练面板 ---------------- */
 (function(){

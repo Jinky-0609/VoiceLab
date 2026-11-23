@@ -56,13 +56,22 @@ def read_text_arg(value: str | None, fallback: str | None = None) -> str | None:
 
 # ---------------------------------------------------------------- engine
 
+# 引擎缓存：按 (gpt, sovits) 做 key。
+#
+# 曾经是单个全局 _ENGINE 无条件复用，导致两个真 bug：
+#   1. 切换音色无效——换 profile 后仍用上一个音色的权重合成；
+#   2. 界面"预热引擎"形同虚设——预热 A 后合成 B，缓存把 B 的请求也返回成 A
+#      （或反过来触发一次意料之外的重载，用户看到"预热了还是要等几十秒"）。
+# 现在按权重路径缓存，一次只保留最近一个（语音模型很吃显存，多留会 OOM）。
 _ENGINE = None
+_ENGINE_KEY: tuple[str, str] | None = None
 
 
 def get_engine(cfg: dict, gpt: str, sovits: str):
-    """延迟加载：同一进程内多次合成就只加载一次模型。"""
-    global _ENGINE
-    if _ENGINE is not None:
+    """按 (gpt, sovits) 缓存引擎；权重变了必须重新加载。"""
+    global _ENGINE, _ENGINE_KEY
+    key = (str(Path(gpt).resolve()), str(Path(sovits).resolve()))
+    if _ENGINE is not None and _ENGINE_KEY == key:
         return _ENGINE
 
     from tts_engine import TTSInferencer  # noqa: E402
@@ -72,11 +81,37 @@ def get_engine(cfg: dict, gpt: str, sovits: str):
     # 上游 tools/i18n/i18n.py 用 os.path.relpath(__file__)，要求 cwd 与代码同盘符。
     os.chdir(LAB)
 
+    # 换权重前先把旧引擎释放掉，否则 8GB 卡上会两份权重叠加导致 OOM
+    if _ENGINE is not None:
+        old_ver = getattr(_ENGINE, "model_version", "?")
+        print(f"[切换] 释放旧引擎（{old_ver}）以便加载新权重", flush=True)
+        try:
+            del _ENGINE.tts
+        except Exception:
+            pass
+        _ENGINE = None
+        _ENGINE_KEY = None
+        gc.collect()
+        try:
+            import torch
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
+
     t0 = time.perf_counter()
     engine = TTSInferencer(gpt_path=gpt, sovits_path=sovits)
     print(f"[加载] {time.perf_counter() - t0:.1f}s  version={engine.model_version}  device={engine.device}", flush=True)
     _ENGINE = engine
+    _ENGINE_KEY = key
     return engine
+
+
+def engine_ready_for(gpt: str, sovits: str) -> bool:
+    """当前缓存是否正好是这对权重（供 webui 判断"预热是否命中"）。"""
+    if _ENGINE is None or _ENGINE_KEY is None:
+        return False
+    key = (str(Path(gpt).resolve()), str(Path(sovits).resolve()))
+    return _ENGINE_KEY == key
 
 
 # ---------------------------------------------------------------- commands
