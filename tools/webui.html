@@ -6,187 +6,548 @@
 <title>VoiceLab</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%236d8dff'/><path d='M11 8h10l-3 9h4l-8 11 2-8h-4z' fill='%23fff'/></svg>">
 <style>
+  /* ============================================================
+     VoiceLab · iOS 风格
+     浅色分组背景 + 白色圆角卡片 + iOS 系统蓝 + 系统字体栈
+     圆角按 iOS 的连续曲率取大值；阴影极淡，层次靠背景色差而不是描边
+     ============================================================ */
   :root{
-    --bg:#0b0d10; --panel:#14171c; --panel-2:#191d23; --line:#252a32; --line-2:#2f353f;
-    --fg:#e7eaee; --muted:#878f9b; --dim:#5c6470;
-    --accent:#6d8dff; --accent-dim:#4a67d6;
-    --ok:#3ddc97; --warn:#ffb454; --err:#ff6b7a;
-    --r:12px; --r-s:8px;
-    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    /* iOS 系统色 */
+    --ios-blue:#007AFF; --ios-blue-dim:#0A66D6;
+    --ios-green:#34C759; --ios-orange:#FF9500; --ios-red:#FF3B30;
+    --ios-purple:#AF52DE;
+
+    /* 分组列表背景（iOS Settings 那种灰） */
+    --bg:#F2F2F7;
+    --bg-elev:#FFFFFF;
+    --panel:#FFFFFF;
+    --panel-2:#F2F2F7;
+    --panel-3:#E9E9EE;
+
+    /* 文本层级：iOS 用 label / secondaryLabel / tertiaryLabel */
+    --fg:#000000;
+    --muted:#8E8E93;      /* systemGray */
+    --dim:#AEAEB2;        /* systemGray3 */
+    --line:#E5E5EA;       /* separator */
+    --line-2:#D1D1D6;
+
+    --accent:var(--ios-blue);
+    --ok:var(--ios-green); --warn:var(--ios-orange); --err:var(--ios-red);
+
+    --r:16px; --r-s:12px; --r-xs:10px;
+    --shadow:0 .5px 1px rgba(0,0,0,.03), 0 2px 10px rgba(0,0,0,.035);
+    --shadow-lg:0 8px 32px rgba(0,0,0,.10);
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%}
+  html{-webkit-text-size-adjust:100%}
   body{
     background:var(--bg); color:var(--fg);
-    font:15px/1.6 system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    font:16px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",
+         "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
     -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
   }
-  ::selection{background:rgba(109,141,255,.32)}
-  button{font:inherit;color:inherit}
+  ::selection{background:rgba(0,122,255,.18)}
+  button{font:inherit;color:inherit;-webkit-tap-highlight-color:transparent}
 
-  /* ---------- 顶栏 ---------- */
+  /* ---------- 顶栏：iOS 大标题导航栏 ---------- */
   header{
-    height:54px; display:flex; align-items:center; gap:12px; padding:0 20px;
-    border-bottom:1px solid var(--line); background:rgba(11,13,16,.86);
-    backdrop-filter:blur(10px); position:sticky; top:0; z-index:20;
+    height:54px; display:flex; align-items:center; gap:16px; padding:0 20px;
+    background:rgba(255,255,255,.82);
+    -webkit-backdrop-filter:saturate(180%) blur(20px);
+    backdrop-filter:saturate(180%) blur(20px);
+    border-bottom:.5px solid rgba(0,0,0,.10);
+    position:sticky; top:0; z-index:20;
   }
-  .brand{display:flex;align-items:center;gap:9px;font-weight:600;letter-spacing:.2px}
-  .logo{width:22px;height:22px;border-radius:6px;background:linear-gradient(135deg,var(--accent),#a06bff);
-        display:grid;place-items:center;font-size:11px;font-weight:800;color:#fff}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:600;font-size:17px;letter-spacing:-.2px}
+  .logo{
+    width:26px;height:26px;border-radius:7px;
+    background:linear-gradient(160deg,#4B9BFF,var(--ios-blue));
+    display:grid;place-items:center;font-size:12px;font-weight:700;color:#fff;
+    box-shadow:0 1px 3px rgba(0,122,255,.32);
+  }
   .spacer{flex:1}
 
-  .pill{
-    display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 11px;
-    border:1px solid var(--line);border-radius:999px;font-size:12.5px;color:var(--muted);
-    background:var(--panel);transition:.25s;
+  /* 分段控件（iOS Segmented Control） */
+  .tabs{display:flex;gap:0;background:var(--panel-3);border-radius:9px;padding:2px}
+  .tab{
+    height:28px;padding:0 16px;border-radius:7px;border:0;background:transparent;
+    cursor:pointer;font-size:13.5px;font-weight:500;color:var(--fg);
+    transition:all .22s cubic-bezier(.4,0,.2,1);
   }
-  .dot{width:7px;height:7px;border-radius:50%;background:var(--dim);transition:.25s;flex:none}
-  .pill.ready{color:var(--ok);border-color:rgba(61,220,151,.28);background:rgba(61,220,151,.07)}
-  .pill.ready .dot{background:var(--ok);box-shadow:0 0 0 3px rgba(61,220,151,.16)}
-  .pill.working{color:var(--warn);border-color:rgba(255,180,84,.3);background:rgba(255,180,84,.07)}
-  .pill.working .dot{background:var(--warn);animation:blink 1s ease-in-out infinite}
-  .pill.bad{color:var(--err);border-color:rgba(255,107,122,.3);background:rgba(255,107,122,.07)}
-  .pill.bad .dot{background:var(--err)}
-  @keyframes blink{50%{opacity:.25}}
+  .tab.on{background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.10)}
+
+  .pill{
+    display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 11px;
+    border:0;border-radius:13px;font-size:12.5px;font-weight:500;color:var(--muted);
+    background:var(--panel-3);transition:.22s;
+  }
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--dim);transition:.22s;flex:none}
+  .pill.ready{color:var(--ios-green);background:rgba(52,199,89,.12)}
+  .pill.ready .dot{background:var(--ios-green)}
+  .pill.working{color:var(--ios-orange);background:rgba(255,149,0,.12)}
+  .pill.working .dot{background:var(--ios-orange);animation:pulse 1.4s ease-in-out infinite}
+  .pill.bad{color:var(--ios-red);background:rgba(255,59,48,.10)}
+  .pill.bad .dot{background:var(--ios-red)}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
 
   /* ---------- 布局 ---------- */
   main{
-    max-width:1180px;margin:0 auto;padding:22px 20px 60px;
-    display:grid;grid-template-columns:minmax(0,1fr) 372px;gap:20px;align-items:start;
+    max-width:1000px;margin:0 auto;padding:22px 20px 80px;
+    display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:20px;align-items:start;
   }
-  @media(max-width:1000px){main{grid-template-columns:minmax(0,1fr)}}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r)}
+  main.train-mode{grid-template-columns:minmax(0,1fr)}
+  @media(max-width:960px){main{grid-template-columns:minmax(0,1fr)}}
+
+  /* 卡片：白色圆角 + 极淡阴影（iOS inset grouped list 的皮） */
+  .card{
+    background:var(--panel);border-radius:var(--r);
+    box-shadow:var(--shadow);overflow:hidden;
+  }
 
   /* ---------- 输入区 ---------- */
-  .sel-row{display:grid;grid-template-columns:1.25fr 1fr auto;gap:10px;padding:14px;border-bottom:1px solid var(--line)}
-  @media(max-width:640px){.sel-row{grid-template-columns:1fr}}
-  .field{display:flex;flex-direction:column;gap:5px;min-width:0}
-  .field>label{font-size:11.5px;color:var(--dim);letter-spacing:.4px;padding-left:2px}
-
-  select,.inp,input[type=text],input[type=number]{
-    height:36px;padding:0 11px;background:var(--panel-2);border:1px solid var(--line-2);
-    border-radius:var(--r-s);color:var(--fg);width:100%;transition:.15s;appearance:none;
+  .sel-row{
+    display:grid;grid-template-columns:1.2fr 1fr auto;gap:12px;
+    padding:16px;border-bottom:.5px solid var(--line);
   }
-  select{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M0 0l5 6 5-6z' fill='%23878f9b'/></svg>");
-         background-repeat:no-repeat;background-position:right 11px center;padding-right:28px;cursor:pointer}
-  select:hover,input:hover{border-color:#3b434f}
-  select:focus,input:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(109,141,255,.16)}
+  @media(max-width:620px){.sel-row{grid-template-columns:1fr}}
+  .field{display:flex;flex-direction:column;gap:6px;min-width:0}
+  .field>label{
+    font-size:12.5px;color:var(--muted);font-weight:500;
+    letter-spacing:.1px;padding-left:2px;
+  }
+
+  /* 输入控件：iOS 填充式输入框 */
+  select,.inp,input[type=text],input[type=number]{
+    height:40px;padding:0 13px;background:var(--panel-2);
+    border:.5px solid transparent;border-radius:var(--r-xs);
+    color:var(--fg);width:100%;font-size:15.5px;
+    transition:background .18s,border-color .18s;
+    appearance:none;-webkit-appearance:none;
+  }
+  select{
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8'><path d='M1 1.5l5 5 5-5' fill='none' stroke='%238E8E93' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    background-repeat:no-repeat;background-position:right 13px center;
+    padding-right:34px;cursor:pointer;
+  }
+  select:hover,input:hover{background:#EBEBF0}
+  select:focus,input:focus,textarea:focus{
+    outline:none;background:#fff;border-color:var(--ios-blue);
+    box-shadow:0 0 0 3.5px rgba(0,122,255,.12);
+  }
   select:disabled,input:disabled{opacity:.45;cursor:not-allowed}
+  input::placeholder,textarea::placeholder{color:var(--dim)}
 
   textarea{
-    width:100%;min-height:132px;resize:vertical;padding:14px;background:transparent;border:0;
-    color:var(--fg);font:inherit;line-height:1.7;display:block;
+    width:100%;min-height:170px;resize:vertical;padding:16px 16px 18px;
+    background:transparent;border:0;color:var(--fg);
+    font:inherit;font-size:16px;line-height:1.55;display:block;
   }
-  textarea:focus{outline:none}
-  .compose-wrap{position:relative}
+  textarea:focus{outline:none;box-shadow:none;background:transparent}
+  .compose-wrap{position:relative;border-bottom:.5px solid var(--line)}
   .placeholder-hint{
-    position:absolute;inset:14px auto auto 14px;color:var(--dim);pointer-events:none;transition:.2s;font-size:14.5px
+    position:absolute;inset:16px auto auto 16px;color:var(--dim);
+    pointer-events:none;transition:opacity .2s,transform .2s;font-size:16px;line-height:1.5;
   }
-  .compose-wrap.filled .placeholder-hint{opacity:0;transform:translateY(-3px)}
+  .compose-wrap.filled .placeholder-hint{opacity:0;transform:translateY(-2px)}
 
+  /* 警告条：iOS 橙色提示卡 */
   .warn-strip{
-    display:none;align-items:flex-start;gap:8px;margin:0 14px 10px;padding:9px 11px;
-    background:rgba(255,180,84,.08);border:1px solid rgba(255,180,84,.25);
-    border-radius:var(--r-s);font-size:12.8px;color:#f5c880;line-height:1.5
+    display:none;align-items:flex-start;gap:9px;margin:0 16px 12px;padding:11px 13px;
+    background:rgba(255,149,0,.10);border-radius:var(--r-s);
+    font-size:13.5px;color:#8A5A00;line-height:1.45;
   }
-  .warn-strip.on{display:flex;animation:slideDown .2s ease}
-  @keyframes slideDown{from{opacity:0;transform:translateY(-4px)}}
+  .warn-strip.on{display:flex;animation:fadeIn .22s ease}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(-3px)}}
 
-  .bar{display:flex;align-items:center;gap:10px;padding:11px 14px;border-top:1px solid var(--line);flex-wrap:wrap}
-  .count{font:12.5px/1 var(--mono);color:var(--dim)}
-  .count.over{color:var(--err)}
-  kbd{font:11px/1 var(--mono);padding:3px 5px;border:1px solid var(--line-2);border-bottom-width:2px;
-      border-radius:5px;color:var(--muted);background:var(--panel-2)}
+  .bar{
+    display:flex;align-items:center;gap:10px;padding:13px 16px;
+    border-top:.5px solid var(--line);flex-wrap:wrap;
+  }
+  .count{font-size:13.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .count.over{color:var(--ios-red);font-weight:500}
 
+  kbd{
+    font:12px/1 var(--mono);padding:3px 6px;border-radius:5px;
+    background:var(--panel-2);color:var(--muted);border:.5px solid var(--line-2);
+  }
+
+  /* 按钮：iOS 填充/描边/文字三种 */
   .btn{
-    height:36px;padding:0 15px;border-radius:var(--r-s);border:1px solid var(--line-2);
-    background:var(--panel-2);cursor:pointer;display:inline-flex;align-items:center;gap:7px;
-    font-size:13.5px;transition:.15s;white-space:nowrap
+    height:38px;padding:0 17px;border-radius:var(--r-xs);border:.5px solid transparent;
+    background:var(--panel-2);cursor:pointer;
+    display:inline-flex;align-items:center;justify-content:center;gap:7px;
+    font-size:15.5px;font-weight:500;white-space:nowrap;
+    transition:background .16s,transform .12s,opacity .16s;
   }
-  .btn:hover:not(:disabled){border-color:#454e5c;background:#1e232a;transform:translateY(-.5px)}
-  .btn:active:not(:disabled){transform:translateY(0)}
-  .btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-  .btn:disabled{opacity:.42;cursor:not-allowed}
-  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:550}
-  .btn.primary:hover:not(:disabled){background:#7e9bff;border-color:#7e9bff}
-  .btn.ghost{background:transparent;border-color:transparent;color:var(--muted)}
-  .btn.ghost:hover:not(:disabled){color:var(--fg);background:var(--panel-2)}
-  .btn.sm{height:29px;padding:0 10px;font-size:12.5px}
-  .btn.icon{width:29px;padding:0;justify-content:center}
+  .btn:hover:not(:disabled){background:var(--panel-3)}
+  .btn:active:not(:disabled){transform:scale(.97);opacity:.85}
+  .btn:focus-visible{outline:none;box-shadow:0 0 0 3.5px rgba(0,122,255,.28)}
+  .btn:disabled{opacity:.38;cursor:not-allowed}
 
-  .spinner{width:13px;height:13px;border:2px solid rgba(255,255,255,.28);border-top-color:#fff;
-           border-radius:50%;animation:spin .62s linear infinite;flex:none}
+  .btn.primary{
+    background:var(--ios-blue);border-color:transparent;color:#fff;font-weight:590;
+    box-shadow:0 1px 3px rgba(0,122,255,.28);
+  }
+  .btn.primary:hover:not(:disabled){background:var(--ios-blue-dim)}
+  .btn.primary:active:not(:disabled){transform:scale(.97)}
+
+  .btn.ghost{background:transparent;color:var(--ios-blue);border-color:transparent}
+  .btn.ghost:hover:not(:disabled){background:rgba(0,122,255,.08)}
+
+  .btn.sm{height:31px;padding:0 12px;font-size:14px;border-radius:8px}
+  .btn.icon{width:31px;padding:0}
+  .btn.danger{color:var(--ios-red)}
+  .btn.danger:hover:not(:disabled){background:rgba(255,59,48,.08)}
+
+  .spinner{
+    width:14px;height:14px;border:2px solid rgba(255,255,255,.35);
+    border-top-color:#fff;border-radius:50%;
+    animation:spin .62s linear infinite;flex:none;
+  }
+  .btn:not(.primary) .spinner{border-color:rgba(0,0,0,.14);border-top-color:var(--muted)}
   @keyframes spin{to{transform:rotate(360deg)}}
 
-  /* ---------- 高级面板 ---------- */
-  .adv{border-top:1px solid var(--line);padding:0 14px;max-height:0;overflow:hidden;
-       transition:max-height .3s cubic-bezier(.4,0,.2,1),padding .3s}
-  .adv.open{max-height:560px;padding:14px}
-  .adv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:11px}
-  .adv .hint{margin-top:11px;font-size:12.2px;color:var(--dim);line-height:1.6}
-  .check{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);cursor:pointer;user-select:none}
-  input[type=checkbox]{width:15px;height:15px;accent-color:var(--accent);cursor:pointer;margin:0}
+  /* ---------- 高级面板：可折叠 ---------- */
+  .adv{border-top:.5px solid var(--line);padding:0 16px;max-height:0;overflow:hidden;
+       transition:max-height .34s cubic-bezier(.4,0,.2,1),padding .34s}
+  .adv.open{max-height:640px;padding:16px}
+  .adv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:13px}
+  .adv .hint{margin-top:13px;font-size:12.8px;color:var(--muted);line-height:1.55}
+  .check{
+    display:flex;align-items:center;gap:9px;font-size:15px;color:var(--fg);
+    cursor:pointer;-webkit-user-select:none;user-select:none;
+  }
+  input[type=checkbox]{
+    width:20px;height:20px;accent-color:var(--ios-blue);cursor:pointer;margin:0;flex:none;
+  }
 
-  /* ---------- 历史 ---------- */
-  .hist-head{display:flex;align-items:center;gap:9px;padding:13px 15px;border-bottom:1px solid var(--line)}
-  .hist-head h2{margin:0;font-size:13.5px;font-weight:600;letter-spacing:.3px}
-  .hist-head .n{font:11.5px/1 var(--mono);color:var(--dim);padding:3px 6px;background:var(--panel-2);border-radius:5px}
-  .hist-list{max-height:min(72vh,780px);overflow-y:auto;overscroll-behavior:contain;padding:8px}
-  .hist-list::-webkit-scrollbar{width:9px}
-  .hist-list::-webkit-scrollbar-thumb{background:#272d36;border-radius:9px;border:3px solid var(--panel)}
-  .hist-list::-webkit-scrollbar-thumb:hover{background:#333b46}
+  /* ---------- 列表（历史 / 音色）：iOS 分组列表 ---------- */
+  .hist-head{
+    display:flex;align-items:center;gap:9px;padding:15px 17px;
+    border-bottom:.5px solid var(--line);
+  }
+  .hist-head h2{margin:0;font-size:17px;font-weight:600;letter-spacing:-.2px}
+  .hist-head .n{
+    font-size:12.5px;font-weight:590;color:var(--muted);
+    background:var(--panel-2);padding:3px 8px;border-radius:9px;
+  }
+  .hist-list{
+    max-height:min(70vh,760px);overflow-y:auto;overscroll-behavior:contain;padding:10px;
+  }
+  .hist-list::-webkit-scrollbar{width:10px}
+  .hist-list::-webkit-scrollbar-thumb{
+    background:rgba(0,0,0,.16);border-radius:10px;border:3px solid #fff;
+  }
+  .hist-list::-webkit-scrollbar-thumb:hover{background:rgba(0,0,0,.26)}
 
   .item{
-    border:1px solid var(--line);border-radius:10px;padding:10px 11px;margin-bottom:8px;
-    background:var(--panel-2);transition:.18s;animation:pop .26s cubic-bezier(.2,.9,.3,1.3)
+    background:var(--panel-2);border-radius:var(--r-s);padding:13px 14px;margin-bottom:9px;
+    transition:background .18s,box-shadow .18s;animation:pop .3s cubic-bezier(.32,.72,0,1);
+    border:.5px solid transparent;
   }
-  @keyframes pop{from{opacity:0;transform:translateY(-7px) scale(.985)}}
-  .item:hover{border-color:var(--line-2)}
-  .item.active{border-color:rgba(109,141,255,.5);background:rgba(109,141,255,.06)}
-  .item.running{border-color:rgba(255,180,84,.4)}
-  .item.collapsed,.item.error{border-color:rgba(255,107,122,.35);background:rgba(255,107,122,.05)}
+  @keyframes pop{from{opacity:0;transform:scale(.98) translateY(-4px)}}
+  .item:hover{background:#EDEDF2}
+  .item.active{
+    background:#fff;border-color:rgba(0,122,255,.35);
+    box-shadow:0 0 0 3px rgba(0,122,255,.10);
+  }
+  .item.running{background:rgba(255,149,0,.07);border-color:rgba(255,149,0,.28)}
+  .item.collapsed,.item.error{background:rgba(255,59,48,.055);border-color:rgba(255,59,48,.22)}
+
   .i-top{display:flex;align-items:center;gap:8px;margin-bottom:7px}
-  .tag{font-size:11px;padding:2px 7px;border-radius:5px;background:#20262f;color:var(--muted);white-space:nowrap}
-  .tag.hi{background:rgba(109,141,255,.14);color:#9db2ff}
-  .meta{margin-left:auto;font:11px/1 var(--mono);color:var(--dim);white-space:nowrap}
-  .txt{font-size:13.2px;color:#c8cdd5;line-height:1.55;margin-bottom:9px;word-break:break-word;
-       display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-  .i-act{display:flex;align-items:center;gap:7px}
-  .dur{font:11px/1 var(--mono);color:var(--dim)}
-  audio{display:none}
-  .empty{text-align:center;padding:46px 20px;color:var(--dim)}
-  .empty svg{opacity:.42;margin-bottom:11px}
-  .empty p{margin:0;font-size:13px;line-height:1.75}
-  .prog{height:3px;border-radius:3px;background:#242a33;overflow:hidden;margin:2px 0 8px}
-  .prog i{display:block;height:100%;width:34%;border-radius:3px;
-          background:linear-gradient(90deg,transparent,var(--warn),transparent);animation:slide 1.25s ease-in-out infinite}
-  @keyframes slide{0%{transform:translateX(-110%)}100%{transform:translateX(330%)}}
-  .msg{font-size:12.4px;line-height:1.6;color:#ffb0ba;margin-bottom:8px;word-break:break-word;white-space:pre-line}
-
-  /* ---------- Toast ---------- */
-  #toasts{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:100;
-          display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
-  .toast{
-    padding:10px 15px;border-radius:9px;background:#1c2129;border:1px solid var(--line-2);
-    font-size:13px;box-shadow:0 12px 34px rgba(0,0,0,.5);display:flex;align-items:center;gap:9px;
-    animation:tin .24s cubic-bezier(.2,.9,.3,1.25)
+  .tag{
+    font-size:12px;font-weight:500;padding:2.5px 8px;border-radius:7px;
+    background:rgba(120,120,128,.14);color:var(--muted);white-space:nowrap;
   }
-  @keyframes tin{from{opacity:0;transform:translateY(11px) scale(.97)}}
-  .toast.out{animation:tout .2s ease forwards}
-  @keyframes tout{to{opacity:0;transform:translateY(7px)}}
-  .toast.ok{border-color:rgba(61,220,151,.34)}
-  .toast.err{border-color:rgba(255,107,122,.36)}
-  .toast .bar-l{width:3px;height:15px;border-radius:2px;background:var(--muted);flex:none}
-  .toast.ok .bar-l{background:var(--ok)} .toast.err .bar-l{background:var(--err)}
+  .tag.hi{background:rgba(0,122,255,.12);color:var(--ios-blue)}
+  .meta{margin-left:auto;font-size:12.5px;color:var(--dim);white-space:nowrap;
+        font-variant-numeric:tabular-nums}
+  .txt{
+    font-size:15px;color:var(--fg);line-height:1.45;margin-bottom:10px;word-break:break-word;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  }
+  .i-act{display:flex;align-items:center;gap:8px}
+  .dur{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+  audio{display:none}
 
-  .foot-note{grid-column:1/-1;font-size:12.2px;color:var(--dim);text-align:center;padding:4px 0 0}
-  .foot-note code{font-family:var(--mono);background:var(--panel-2);padding:1px 5px;border-radius:4px}
+  .empty{text-align:center;padding:52px 22px;color:var(--dim)}
+  .empty svg{opacity:.34;margin-bottom:13px}
+  .empty p{margin:0;font-size:14px;line-height:1.75}
+  .empty-sm{font-size:13.5px;color:var(--muted);text-align:center;padding:22px 10px;line-height:1.7}
+
+  /* 进度条 */
+  .prog{height:3px;border-radius:3px;background:rgba(120,120,128,.18);overflow:hidden;margin:3px 0 10px}
+  .prog i{
+    display:block;height:100%;width:34%;border-radius:3px;
+    background:linear-gradient(90deg,transparent,var(--ios-orange),transparent);
+    animation:slide 1.3s ease-in-out infinite;
+  }
+  @keyframes slide{0%{transform:translateX(-110%)}100%{transform:translateX(330%)}}
+  .msg{font-size:13.5px;line-height:1.55;color:var(--ios-red);margin-bottom:9px;
+       word-break:break-word;white-space:pre-line}
+
+  /* ---------- 训练面板 ---------- */
+  .pane{display:none}
+  .pane.on{display:block}
+  .train-grid{
+    display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:20px;align-items:start;
+  }
+  @media(max-width:960px){.train-grid{grid-template-columns:minmax(0,1fr)}}
+  .sec{padding:16px;border-bottom:.5px solid var(--line)}
+  .sec:last-child{border-bottom:0}
+  .sec>h3{margin:0 0 13px;font-size:15px;font-weight:600;letter-spacing:-.1px}
+
+  .drop{
+    border:1.5px dashed var(--line-2);border-radius:var(--r-s);
+    padding:30px 18px;text-align:center;cursor:pointer;
+    background:var(--panel-2);transition:all .2s;
+  }
+  .drop:hover,.drop.over{
+    border-color:var(--ios-blue);background:rgba(0,122,255,.055);
+  }
+  .drop .big{font-size:15.5px;font-weight:500;color:var(--fg);margin-bottom:6px}
+  .drop .sub{font-size:13px;color:var(--muted);line-height:1.6}
+
+  .filechip{
+    display:flex;align-items:center;gap:10px;padding:11px 13px;
+    background:var(--panel-2);border-radius:var(--r-xs);font-size:14.5px;margin-top:11px;
+  }
+  .filechip .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+  .steps-list{display:flex;flex-direction:column;gap:9px}
+  .step-row{
+    display:flex;align-items:flex-start;gap:12px;padding:13px 14px;
+    background:var(--panel-2);border-radius:var(--r-s);
+    border:.5px solid transparent;transition:all .18s;
+  }
+  .step-row.on{background:rgba(0,122,255,.055);border-color:rgba(0,122,255,.28)}
+  .step-row.opt .name::after{
+    content:"可选";margin-left:8px;font-size:11.5px;font-weight:500;
+    color:var(--ios-orange);background:rgba(255,149,0,.13);
+    padding:1.5px 7px;border-radius:6px;
+  }
+  .step-row .body{flex:1;min-width:0}
+  .step-row .name{font-size:15px;font-weight:500;display:flex;align-items:center}
+  .step-row .desc{font-size:13px;color:var(--muted);margin-top:4px;line-height:1.5}
+
+  .log-box{
+    background:#1C1C1E;border-radius:var(--r-s);padding:13px;
+    font:12px/1.6 var(--mono);color:#D1D1D6;
+    height:340px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;
+  }
+  .log-box::-webkit-scrollbar{width:10px}
+  .log-box::-webkit-scrollbar-thumb{
+    background:rgba(255,255,255,.18);border-radius:10px;border:3px solid #1C1C1E;
+  }
+  .log-box .ok{color:#30D158} .log-box .err{color:#FF453A} .log-box .warn{color:#FF9F0A}
+  .log-box .dim{color:#8E8E93}
+
+  /* 音色列表 */
+  .sp-list{display:flex;flex-direction:column;gap:10px;padding:12px}
+  .sp-item{
+    background:var(--panel-2);border-radius:var(--r-s);padding:13px 14px;
+  }
+  .sp-item .row1{display:flex;align-items:center;gap:9px;margin-bottom:7px}
+  .sp-item .nm{font-size:15.5px;font-weight:590}
+  .sp-item .pips-row{display:flex;gap:11px;flex-wrap:wrap;margin-top:7px}
+  .pips{
+    display:flex;align-items:center;gap:5px;font-size:12.5px;
+    color:var(--muted);white-space:nowrap;
+  }
+  .pip{width:7px;height:7px;border-radius:50%;background:var(--line-2);flex:none}
+  .pip.on{background:var(--ios-green)}
+
+  .foot-note{
+    grid-column:1/-1;font-size:12.8px;color:var(--dim);text-align:center;padding:6px 0 0;
+  }
+  .foot-note code{
+    font-family:var(--mono);font-size:12px;
+    background:rgba(120,120,128,.13);padding:2px 6px;border-radius:5px;
+  }
+
+  /* ---------- Toast：iOS 通知横幅 ---------- */
+  #toasts{
+    position:fixed;left:50%;bottom:32px;transform:translateX(-50%);z-index:100;
+    display:flex;flex-direction:column;gap:9px;align-items:center;pointer-events:none;
+  }
+  .toast{
+    padding:13px 18px;border-radius:14px;
+    background:rgba(28,28,30,.94);
+    -webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);
+    color:#fff;font-size:14.5px;font-weight:500;
+    box-shadow:var(--shadow-lg);
+    display:flex;align-items:center;gap:10px;
+    animation:toastIn .3s cubic-bezier(.32,.72,0,1);
+  }
+  @keyframes toastIn{from{opacity:0;transform:translateY(14px) scale(.96)}}
+  .toast.out{animation:toastOut .22s ease forwards}
+  @keyframes toastOut{to{opacity:0;transform:translateY(8px) scale(.98)}}
+  .toast .bar-l{width:3px;height:16px;border-radius:2px;background:rgba(255,255,255,.4);flex:none}
+  .toast.ok .bar-l{background:var(--ios-green)}
+  .toast.err .bar-l{background:var(--ios-red)}
+
+  /* ---------- 弹层：iOS Action Sheet ---------- */
+  .sheet-mask{
+    position:fixed;inset:0;background:rgba(0,0,0,.34);z-index:90;
+    display:none;align-items:center;justify-content:center;padding:20px;
+    -webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);
+  }
+  .sheet-mask.on{display:flex;animation:fadeIn .18s ease}
+  .sheet{
+    background:rgba(255,255,255,.96);
+    -webkit-backdrop-filter:blur(24px);backdrop-filter:blur(24px);
+    border-radius:20px;width:100%;max-width:420px;overflow:hidden;
+    box-shadow:var(--shadow-lg);
+    animation:sheetIn .3s cubic-bezier(.32,.72,0,1);
+  }
+  @keyframes sheetIn{from{opacity:0;transform:scale(.94) translateY(10px)}}
+  .sheet-body{padding:22px 22px 18px;text-align:center}
+  .sheet-title{font-size:17px;font-weight:600;margin-bottom:7px;letter-spacing:-.2px}
+  .sheet-text{font-size:14px;color:var(--muted);line-height:1.5}
+  .sheet-list{
+    text-align:left;margin:15px 0 0;font-size:14px;color:var(--muted);
+    max-height:200px;overflow-y:auto;
+  }
+  .sheet-list div{padding:5px 0;border-bottom:.5px solid var(--line);display:flex;gap:8px}
+  .sheet-list div:last-child{border-bottom:0}
+  .sheet-list b{color:var(--fg);font-weight:500;flex:1;min-width:0;
+                overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sheet-list span{color:var(--muted);flex:none;font-variant-numeric:tabular-nums}
+  .sheet-actions{display:flex;gap:.5px;border-top:.5px solid var(--line)}
+  .sheet-actions button{
+    flex:1;height:52px;border:0;background:transparent;cursor:pointer;
+    font-size:17px;font-weight:500;color:var(--ios-blue);
+    transition:background .15s;
+  }
+  .sheet-actions button:hover{background:rgba(0,0,0,.04)}
+  .sheet-actions button:active{background:rgba(0,0,0,.08)}
+  .sheet-actions button.destructive{color:var(--ios-red);font-weight:600}
+  .sheet-actions button.cancel{font-weight:590}
+
+  /* ============================================================
+     iOS 动效层
+     原则：短(≤350ms)、弹性(cubic-bezier 回弹)、只动 transform/opacity
+     （合成器友好，不掉帧）。遵循 prefers-reduced-motion。
+     ============================================================ */
+
+  /* 进场：页面元素依次浮现 */
+  @keyframes riseIn{
+    from{opacity:0;transform:translateY(12px) scale(.985)}
+    to{opacity:1;transform:none}
+  }
+  main > .card, main > .pane > .train-grid > .card{
+    animation:riseIn .42s cubic-bezier(.32,.72,0,1) both;
+  }
+  main > .card:nth-child(2),
+  main > .pane > .train-grid > .card:nth-child(2){animation-delay:.06s}
+
+  /* 标签切换：内容淡入 */
+  @keyframes paneIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .pane.on{animation:paneIn .26s cubic-bezier(.32,.72,0,1)}
+
+  /* 分段控件：滑块式反馈 */
+  .tab{position:relative;transition:color .2s,background .24s cubic-bezier(.32,.72,0,1),
+       box-shadow .24s cubic-bezier(.32,.72,0,1)}
+  .tab:active{transform:scale(.96)}
+
+  /* 按钮：按下回弹（iOS 手感的关键） */
+  .btn{
+    transition:background .16s,transform .12s cubic-bezier(.32,.72,0,1),
+               box-shadow .16s,opacity .16s;
+  }
+  .btn:active:not(:disabled){transform:scale(.955)}
+
+  /* 卡片 hover 微浮起（桌面端增强，触屏无副作用） */
+  @media(hover:hover){
+    .card{transition:box-shadow .26s cubic-bezier(.32,.72,0,1),transform .26s cubic-bezier(.32,.72,0,1)}
+    .item:hover{transform:translateY(-1px)}
+  }
+
+  /* 列表项：交错入场 */
+  @keyframes itemIn{
+    from{opacity:0;transform:translateY(-6px) scale(.99)}
+    to{opacity:1;transform:none}
+  }
+  .item{animation:itemIn .3s cubic-bezier(.32,.72,0,1) both}
+  .item:nth-child(1){animation-delay:0ms}
+  .item:nth-child(2){animation-delay:35ms}
+  .item:nth-child(3){animation-delay:70ms}
+  .item:nth-child(4){animation-delay:105ms}
+  .item:nth-child(n+5){animation-delay:130ms}
+
+  /* 删除：先收缩再淡出 */
+  @keyframes itemOut{
+    to{opacity:0;transform:scale(.96);max-height:0;margin-bottom:0;padding-top:0;padding-bottom:0}
+  }
+  .item.removing{
+    animation:itemOut .26s cubic-bezier(.4,0,1,1) forwards;
+    pointer-events:none;overflow:hidden;
+  }
+
+  /* 播放中：图标轻微呼吸，示意"正在响" */
+  @keyframes playingPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.12)}}
+  .item.active [data-play]{animation:playingPulse 1.6s ease-in-out infinite}
+
+  /* 输入聚焦：柔和光晕扩散 */
+  select,input[type=text],input[type=number],textarea{
+    transition:background .18s,border-color .18s,box-shadow .22s cubic-bezier(.32,.72,0,1);
+  }
+
+  /* 百分比/时长的数字跳动 */
+  .dur,.count,.meta{font-variant-numeric:tabular-nums}
+
+  /* 图标按钮：按下微缩 */
+  .sp-item .row1 .del-btn:active{transform:scale(.88)}
+
+  /* Toast 堆叠：进入时后续元素顺次上移 */
+  .toast{will-change:transform,opacity}
+
+  /* 警告条出现时轻微弹一下，吸引注意但不刺眼 */
+  @keyframes warnPop{
+    0%{opacity:0;transform:translateY(-4px) scale(.99)}
+    60%{transform:translateY(1px) scale(1.002)}
+    100%{opacity:1;transform:none}
+  }
+  .warn-strip.on{animation:warnPop .3s cubic-bezier(.32,.72,0,1)}
+
+  /* 高级面板内元素：展开时依次淡入 */
+  @keyframes advItemIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  .adv.open .adv-grid > *{animation:advItemIn .28s cubic-bezier(.32,.72,0,1) both}
+  .adv.open .adv-grid > *:nth-child(1){animation-delay:20ms}
+  .adv.open .adv-grid > *:nth-child(2){animation-delay:35ms}
+  .adv.open .adv-grid > *:nth-child(3){animation-delay:50ms}
+  .adv.open .adv-grid > *:nth-child(4){animation-delay:65ms}
+  .adv.open .adv-grid > *:nth-child(n+5){animation-delay:80ms}
+
+  /* 尊重无障碍设置：关掉所有动效 */
+  @media(prefers-reduced-motion:reduce){
+    *,*::before,*::after{
+      animation-duration:.01ms !important;animation-iteration-count:1 !important;
+      transition-duration:.01ms !important;scroll-behavior:auto !important;
+    }
+  }
+
+  /* 音色删除按钮（列表项右侧） */
+  .sp-item .row1 .del-btn{
+    margin-left:auto;width:28px;height:28px;border-radius:50%;
+    border:0;background:transparent;cursor:pointer;
+    display:grid;place-items:center;color:var(--dim);
+    transition:all .16s;flex:none;
+  }
+  .sp-item .row1 .del-btn:hover{background:rgba(255,59,48,.10);color:var(--ios-red)}
 </style>
 </head>
 <body>
 
 <header>
   <div class="brand"><div class="logo">V</div><span>VoiceLab</span></div>
+  <div class="tabs">
+    <button class="tab on" id="tabSynth">合成</button>
+    <button class="tab" id="tabTrain">训练</button>
+  </div>
   <div class="spacer"></div>
   <div class="pill" id="enginePill" title="引擎常驻后可连续快速合成">
     <span class="dot"></span><span id="engineText">未加载</span>
@@ -194,6 +555,7 @@
 </header>
 
 <main>
+  <div class="pane on" id="paneSynth" style="display:contents">
   <!-- ================= 输入 ================= -->
   <section class="card">
     <div class="sel-row">
@@ -281,10 +643,133 @@
     <div class="hist-list" id="list"></div>
   </aside>
 
+  </div><!-- /paneSynth -->
+
+  <!-- ================= 训练 ================= -->
+  <div class="pane" id="paneTrain" style="display:none">
+   <div class="train-grid">
+    <section class="card">
+      <div class="sec">
+        <h3>1 · 声音素材</h3>
+        <div class="drop" id="drop">
+          <div class="big">拖入音频，或点击选择</div>
+          <div class="sub">支持 wav / mp3 / m4a / flac / mp4 等 · 建议 10 分钟以上单人说话<br>
+            有 BGM 或混响？勾选下面的「去背景音」</div>
+        </div>
+        <input type="file" id="file" accept="audio/*,video/*" hidden>
+        <div id="fileInfo"></div>
+        <div class="field" style="margin-top:11px">
+          <label for="spkName">音色名称（会成为 profile 名）</label>
+          <input type="text" id="spkName" placeholder="例如 myvoice"
+                 pattern="[\w\u4e00-\u9fff\-]{1,32}">
+        </div>
+      </div>
+
+      <div class="sec">
+        <h3>2 · 处理步骤</h3>
+        <div class="steps-list">
+          <label class="step-row opt" id="rowClean">
+            <input type="checkbox" id="useClean">
+            <div class="body">
+              <div class="name">去背景音 / 去混响</div>
+              <div class="desc">UVR5 分离人声并去混响。素材本来干净就别开——分离有损
+                （约 18 dB，每 8 份人声仍混 1 份伴奏）。</div>
+            </div>
+          </label>
+          <label class="step-row on">
+            <input type="checkbox" checked disabled>
+            <div class="body">
+              <div class="name">按静音切分</div>
+              <div class="desc">切成 2~12 秒的训练片段</div>
+            </div>
+          </label>
+          <label class="step-row on">
+            <input type="checkbox" checked disabled>
+            <div class="body">
+              <div class="name">ASR 自动标注</div>
+              <div class="desc">用 Qwen3-ASR 识别每个片段的文字，生成训练用 .list</div>
+            </div>
+          </label>
+          <label class="step-row on">
+            <input type="checkbox" checked disabled>
+            <div class="body">
+              <div class="name">数据准备</div>
+              <div class="desc">文本清洗 / BERT / HuBERT / 语义 token</div>
+            </div>
+          </label>
+          <label class="step-row on">
+            <input type="checkbox" checked disabled>
+            <div class="body">
+              <div class="name">训练（s1 全参 + s2 LoRA）</div>
+              <div class="desc">8GB 显卡建议 s1 batch=4、s2 batch=3</div>
+            </div>
+          </label>
+        </div>
+        <div class="adv-grid" style="margin-top:11px">
+          <div class="field"><label for="epochs_s1">s1 轮数</label>
+            <input type="number" id="epochs_s1" value="15" min="1" max="100"></div>
+          <div class="field"><label for="epochs_s2">s2 轮数</label>
+            <input type="number" id="epochs_s2" value="8" min="1" max="100"></div>
+          <div class="field"><label for="batch_s1">s1 batch</label>
+            <input type="number" id="batch_s1" value="4" min="1" max="32"></div>
+          <div class="field"><label for="batch_s2">s2 batch</label>
+            <input type="number" id="batch_s2" value="3" min="1" max="32"></div>
+        </div>
+      </div>
+
+      <div class="bar">
+        <span class="count" id="trainHint">填好名称并选择文件后可开始</span>
+        <div class="spacer"></div>
+        <button class="btn" id="btnCancel" style="display:none">停止</button>
+        <button class="btn primary" id="btnTrain" disabled>
+          <span id="trainIcon"></span><span id="trainText">开始训练</span>
+        </button>
+      </div>
+    </section>
+
+    <aside class="card" style="display:flex;flex-direction:column">
+      <div class="hist-head">
+        <h2>进度</h2>
+        <span class="n" id="stageN">—</span>
+        <div class="spacer"></div>
+        <span class="pill" id="trainPill" style="height:24px;font-size:11.5px">
+          <span class="dot"></span><span id="trainPillText">空闲</span>
+        </span>
+      </div>
+      <div class="log-box" id="log" style="margin:10px;flex:1">等待开始…</div>
+      <div style="padding:0 10px 10px">
+        <button class="btn sm ghost" id="btnClearLog" style="width:100%">清空日志</button>
+      </div>
+    </aside>
+   </div>
+
+   <section class="card" style="margin-top:20px">
+     <div class="hist-head"><h2>已有音色</h2><span class="n" id="spN">0</span>
+       <div class="spacer"></div>
+       <button class="btn sm ghost" id="btnRefreshSp">刷新</button>
+     </div>
+     <div class="sp-list" id="spList" style="padding:10px"></div>
+   </section>
+  </div><!-- /paneTrain -->
+
   <div class="foot-note">模型常驻本机，不联网调用 · 权重与录音留在 <code>out/web/</code> · 详情看 README</div>
 </main>
 
 <div id="toasts"></div>
+
+<div class="sheet-mask" id="sheetMask">
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+    <div class="sheet-body">
+      <div class="sheet-title" id="sheetTitle"></div>
+      <div class="sheet-text" id="sheetText"></div>
+      <div class="sheet-list" id="sheetList"></div>
+    </div>
+    <div class="sheet-actions">
+      <button id="sheetCancel" class="cancel">取消</button>
+      <button id="sheetOk" class="destructive">删除</button>
+    </div>
+  </div>
+</div>
 <template id="tpl-empty">
   <div class="empty">
     <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3">
@@ -636,6 +1121,310 @@ $("#warmBtn").addEventListener("click", async ()=>{
         else toast("引擎就绪，之后每次只要几秒","ok"); } }catch(e){}
   },1500);
 });
+
+/* ---------------- 训练面板 ---------------- */
+(function(){
+  const T = { job:null, offset:0, timer:null, file:null };
+  const $t = id => document.getElementById(id);
+
+  // 显式用 style 控制，避免 display:contents 与 .pane 规则打架
+  function showPane(which){
+    const isTrain = which === "train";
+    $t("paneSynth").style.display = isTrain ? "none" : "contents";
+    $t("paneTrain").style.display = isTrain ? "block" : "none";
+    document.querySelector("main").classList.toggle("train-mode", isTrain);
+    $t("tabSynth").classList.toggle("on", !isTrain);
+    $t("tabTrain").classList.toggle("on", isTrain);
+    if(isTrain) refreshSpeakers();
+  }
+  $t("tabSynth").onclick = () => showPane("synth");
+  $t("tabTrain").onclick = () => showPane("train");
+
+  // ---- 文件选择 ----
+  const drop = $t("drop"), fileInput = $t("file");
+  drop.onclick = () => fileInput.click();
+  drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
+  drop.ondragleave = () => drop.classList.remove("over");
+  drop.ondrop = e => {
+    e.preventDefault(); drop.classList.remove("over");
+    if(e.dataTransfer.files.length) setFile(e.dataTransfer.files[0]);
+  };
+  fileInput.onchange = () => { if(fileInput.files.length) setFile(fileInput.files[0]); };
+
+  function fmtSize(n){
+    return n > 2**20 ? (n/2**20).toFixed(1)+" MB" : (n/1024).toFixed(0)+" KB";
+  }
+  function setFile(f){
+    T.file = f;
+    $t("fileInfo").innerHTML =
+      '<div class="filechip"><span>🎵</span><span class="grow"></span>'+
+      '<span class="dur" style="color:var(--dim)"></span></div>';
+    const chip = $t("fileInfo").querySelector(".filechip");
+    chip.querySelector(".grow").textContent = f.name;
+    chip.querySelector(".dur").textContent = fmtSize(f.size);
+    // 自动填名字（去掉扩展名和非词字符）
+    if(!$t("spkName").value){
+      const base = f.name.replace(/\.[^.]+$/,"").replace(/[^\w\u4e00-\u9fff\-]/g,"").slice(0,20);
+      if(base) $t("spkName").value = base;
+    }
+    updateTrainBtn();
+  }
+
+  $t("useClean").onchange = () => {
+    $t("rowClean").classList.toggle("on", $t("useClean").checked);
+  };
+  $t("spkName").oninput = updateTrainBtn;
+
+  function updateTrainBtn(){
+    const name = $t("spkName").value.trim();
+    const okName = /^[\w\u4e00-\u9fff\-]{1,32}$/.test(name);
+    const ok = okName && T.file && !T.job;
+    $t("btnTrain").disabled = !ok;
+    $t("trainHint").textContent = !T.file ? "选择一个音频文件"
+      : !okName ? "名称只能用中英文/数字/下划线/连字符（1~32 字）"
+      : T.job ? "训练进行中" : "准备就绪";
+  }
+
+  // ---- 日志 ----
+  function kindOf(line){
+    if(/\[失败\]|\[错误\]|Error|Traceback|退出\] code=[1-9]/.test(line)) return "err";
+    if(/\[警告\]|警告|WARN/.test(line)) return "warn";
+    if(/\[完成\]|\[检查\]|OK|已就绪|全部/.test(line)) return "ok";
+    if(/^\$ |=====/.test(line)) return "dim";
+    return "";
+  }
+  function appendLogs(lines){
+    const box = $t("log");
+    if(T.offset === 0) box.textContent = "";
+    const frag = document.createDocumentFragment();
+    lines.forEach(ln => {
+      const d = document.createElement("div");
+      const k = kindOf(ln);
+      if(k) d.className = k;
+      d.textContent = ln;
+      frag.appendChild(d);
+    });
+    box.appendChild(frag);
+    box.scrollTop = box.scrollHeight;
+  }
+  $t("btnClearLog").onclick = () => { $t("log").textContent = "…"; };
+
+  function paintTrainPill(status, step){
+    const p = $t("trainPill"), tx = $t("trainPillText");
+    p.classList.remove("ready","working","bad");
+    if(status === "running"){ p.classList.add("working"); tx.textContent = step || "运行中"; }
+    else if(status === "done"){ p.classList.add("ready"); tx.textContent = "完成"; }
+    else if(status === "error"){ p.classList.add("bad"); tx.textContent = "失败"; }
+    else if(status === "cancelled"){ p.classList.add("bad"); tx.textContent = "已停止"; }
+    else { tx.textContent = "空闲"; }
+    $t("stageN").textContent = status === "running" ? (step || "…") : "—";
+  }
+
+  // ---- 开始 ----
+  $t("btnTrain").onclick = async () => {
+    const name = $t("spkName").value.trim();
+    if(!T.file || !name) return;
+    $t("trainIcon").innerHTML = '<span class="spinner"></span>';
+    $t("trainText").textContent = "上传中";
+    try{
+      // 1) 上传
+      const fd = new FormData();
+      fd.append("speaker", name);
+      fd.append("file", T.file);
+      const r = await fetch("/api/train/upload", {method:"POST", body:fd});
+      const up = await r.json();
+      if(!r.ok) throw new Error(up.detail || "上传失败");
+
+      // 2) 启动流程
+      const steps = ["segments","asr","prepare","train"];
+      if($t("useClean").checked) steps.unshift("clean");
+      const body = {
+        speaker: name, steps,
+        epochs_s1: +$t("epochs_s1").value || 15,
+        epochs_s2: +$t("epochs_s2").value || 8,
+        batch_s1: +$t("batch_s1").value || 4,
+        batch_s2: +$t("batch_s2").value || 3,
+        dereverb: true
+      };
+      const r2 = await fetch("/api/train/start", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify(body)
+      });
+      const st = await r2.json();
+      if(!r2.ok) throw new Error(st.detail || "启动失败");
+
+      T.job = st.job; T.offset = 0;
+      $t("log").textContent = "";
+      $t("btnCancel").style.display = "inline-flex";
+      $t("trainIcon").innerHTML = '<span class="spinner"></span>';
+      $t("trainText").textContent = "训练中";
+      paintTrainPill("running", "启动中");
+      poll();
+    }catch(e){
+      toast(e.message, "err", 5000);
+      $t("trainIcon").innerHTML = "";
+      $t("trainText").textContent = "开始训练";
+      $t("log").textContent = "启动失败：" + e.message;
+    }
+  };
+
+  async function poll(){
+    if(!T.job) return;
+    try{
+      const j = await fetch("/api/train/job/" + T.job + "?offset=" + T.offset).then(r=>r.json());
+      if(j.lines && j.lines.length){
+        appendLogs(j.lines);
+        T.offset = j.total;
+      }
+      paintTrainPill(j.status, j.step);
+      if(j.status === "running" || j.status === "queued"){
+        T.timer = setTimeout(poll, 1200);
+      }else{
+        T.job = null;
+        $t("btnCancel").style.display = "none";
+        $t("trainIcon").innerHTML = "";
+        $t("trainText").textContent = j.status === "done" ? "再训一个" : "开始训练";
+        $t("btnTrain").disabled = false;
+        if(j.status === "done"){
+          toast("训练完成，音色已加入配置", "ok", 5000);
+          refreshSpeakers();
+          // 合成面板的音色列表也要刷新
+          try{ state.cfg = await api("/api/config"); renderConfig(state.cfg); }catch(e){}
+        }else if(j.status === "error"){
+          toast("训练失败：" + (j.error||"看日志"), "err", 6000);
+        }
+      }
+    }catch(e){
+      T.timer = setTimeout(poll, 2500);
+    }
+  }
+
+  $t("btnCancel").onclick = async () => {
+    if(!T.job) return;
+    try{
+      await fetch("/api/train/cancel/" + T.job, {method:"POST"});
+      toast("已请求停止（子进程会被终止）", "", 3000);
+    }catch(e){ toast("停止失败", "err"); }
+  };
+
+  // ---- 已有音色 ----
+  async function refreshSpeakers(){
+    try{
+      const d = await fetch("/api/train/speakers").then(r=>r.json());
+      const list = $t("spList");
+      $t("spN").textContent = d.speakers.length;
+      if(!d.speakers.length){
+        list.innerHTML = '<div class="empty-sm">还没有训练过的音色</div>';
+        return;
+      }
+      list.innerHTML = "";
+      d.speakers.forEach(s=>{
+        const el = document.createElement("div");
+        el.className = "sp-item";
+        const pip = (on, label) =>
+          '<span class="pips"><span class="pip '+(on?"on":"")+'"></span>'+label+'</span>';
+        el.innerHTML =
+          '<div class="row1"><span class="nm">'+esc(s.speaker)+'</span>'+
+          (s.trained?'<span class="tag hi">已训练</span>':'<span class="tag">未完成</span>')+
+          '<button class="del-btn" data-delvoice="'+esc(s.speaker)+'" '+
+          'title="删除这个音色" aria-label="删除 '+esc(s.speaker)+'">'+
+          '<svg width="15" height="15" viewBox="0 0 20 20" fill="none" '+
+          'stroke="currentColor" stroke-width="1.7" stroke-linecap="round">'+
+          '<path d="M3 5.5h14M8 5.5V4a1 1 0 011-1h2a1 1 0 011 1v1.5"/>'+
+          '<path d="M5.5 5.5l.8 10.2a1.4 1.4 0 001.4 1.3h4.6a1.4 1.4 0 001.4-1.3l.8-10.2"/>'+
+          '</svg></button>'+
+          '</div>'+
+          '<div class="pips-row">'+
+            pip(s.has_source, s.has_source?"素材":"无素材")+
+            pip(s.segments>0, s.segments+" 片段")+
+            pip(s.list_lines>0, s.list_lines+" 条标注")+
+            pip(s.prepared, "数据就绪")+
+            pip(s.trained, "权重就绪")+
+          '</div>';
+        list.appendChild(el);
+      });
+    }catch(e){}
+  }
+  $t("btnRefreshSp").onclick = refreshSpeakers;
+
+  // ---- iOS 弹层（Action Sheet）----
+  function sheet({title, text, items, okText, danger}) {
+    return new Promise(resolve => {
+      const mask = $t("sheetMask");
+      $t("sheetTitle").textContent = title || "";
+      $t("sheetText").textContent = text || "";
+      const list = $t("sheetList");
+      list.innerHTML = "";
+      (items || []).forEach(([label, val]) => {
+        const d = document.createElement("div");
+        const b = document.createElement("b"); b.textContent = label;
+        const sp = document.createElement("span"); sp.textContent = val;
+        d.appendChild(b); d.appendChild(sp); list.appendChild(d);
+      });
+      const ok = $t("sheetOk");
+      ok.textContent = okText || "确定";
+      ok.className = danger === false ? "" : "destructive";
+      mask.classList.add("on");
+      const done = v => {
+        mask.classList.remove("on");
+        ok.onclick = cancel.onclick = mask.onclick = null;
+        document.removeEventListener("keydown", onKey);
+        resolve(v);
+      };
+      const cancel = $t("sheetCancel");
+      ok.onclick = () => done(true);
+      cancel.onclick = () => done(false);
+      mask.onclick = e => { if (e.target === mask) done(false); };
+      const onKey = e => { if (e.key === "Escape") done(false); };
+      document.addEventListener("keydown", onKey);
+      setTimeout(() => cancel.focus(), 60);
+    });
+  }
+
+  // ---- 删除音色 ----
+  async function deleteVoice(name) {
+    let info;
+    try {
+      info = await fetch("/api/train/voice/" + encodeURIComponent(name) + "/assets")
+        .then(r => r.json());
+      if (!info.ok) throw new Error(info.detail || "无法读取");
+    } catch (e) {
+      toast("读取失败：" + e.message, "err", 4000);
+      return;
+    }
+    const items = (info.assets || []).map(a => [a.label + " · " + a.path, a.size]);
+    const yes = await sheet({
+      title: "删除「" + name + "」？",
+      text: "以下内容会被永久删除（" + info.total + "）。"
+          + "config.json 里的档案条目会先备份到 _local/deleted/。",
+      items,
+      okText: "删除",
+      danger: true
+    });
+    if (!yes) return;
+
+    toast("正在删除…", "", 1600);
+    try {
+      const r = await fetch("/api/train/voice/" + encodeURIComponent(name),
+                            {method: "DELETE"});
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || "删除失败");
+      toast("已删除「" + name + "」，释放 " + (d.freed || ""), "ok", 4000);
+      refreshSpeakers();
+      // 合成面板的音色列表同步刷新
+      try { state.cfg = await api("/api/config"); renderConfig(state.cfg); } catch (e) {}
+    } catch (e) {
+      toast("删除失败：" + e.message, "err", 5000);
+    }
+  }
+
+  // 让音色列表里的删除按钮可用（refreshSpeakers 里会插入按钮）
+  document.addEventListener("click", e => {
+    const b = e.target.closest("[data-delvoice]");
+    if (b) { e.stopPropagation(); deleteVoice(b.dataset.delvoice); }
+  });
+  window.__refreshSpeakers = refreshSpeakers;
+})();
 
 /* ---------------- 启动 ---------------- */
 (async function boot(){

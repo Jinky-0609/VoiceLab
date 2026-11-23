@@ -1,0 +1,27 @@
+# VoiceLab 依赖硬约束（pip/uv 的 constraints 文件）
+#
+# 用途：防止后续安装（如 gradio、modelscope）把关键包拖到不兼容版本。
+# 实测事故（2026-11-23）：装 gradio 时它把 huggingface_hub 升到 2.4.0，
+# 而 transformers 4.57.6 硬要求 `<1.0`，直接导致 data prepare 全链路 ModuleNotFoundError。
+#
+# 用法：
+#   uv pip install -p .venv-tts -c requirements/constraints.txt -r requirements/tts.txt
+#   pip install -c requirements/constraints.txt <包名>
+#
+# 下方版本是与上游 GPT-SoVITS 代码实测兼容的组合，**不要随意上浮**：
+#   transformers 4.x -> 5.x 是主版本跃迁，上游代码按 4.x 编写，改了会连锁失败。
+
+# transformers 4.x 要求 huggingface-hub>=0.34,<1.0。
+# hub 只是下载客户端，不进推理计算，锁在下限附近最安全。
+huggingface-hub>=0.34,<1.0
+
+# 推理框架：4.x 是上游适配版本
+transformers>=4.57,<5.0
+
+# gradio 仅因上游 tools/my_utils.py 顶层 import 而需要，不参与推理。
+# 上限不锁死，但必须同时受上面 hub 约束压制。
+gradio>=4.0
+
+# 训练/推理共用的 torch，由 requirements/tts.txt 精确锁定到 +cu128
+torch==2.11.0+cu128
+torchaudio==2.11.0+cu128

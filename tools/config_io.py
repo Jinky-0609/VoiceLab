@@ -26,3 +26,10 @@ def load(verbose: bool = True) -> dict:
             print(f"[引导] 已生成 {CONFIG_PATH.name}（来自 config.example.json）\n"
                   f"       参考音频放 data/refs/，音色档案写进 profiles", flush=True)
     return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+
+
+def save(cfg: dict) -> None:
+    """写回 config.json。先写临时文件再替换，避免中途失败把配置写坏。"""
+    tmp = CONFIG_PATH.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(CONFIG_PATH)

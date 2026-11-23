@@ -182,23 +182,85 @@ def speakers() -> dict:
 
 # ------------------------------------------------------------------ 各阶段
 
-def _stage_segments(job: Job, sp: str, max_len: float, min_len: float) -> int:
-    """长音频按静音切分。已是 WAV 就直接切，其他格式先抽音频。"""
+def _stage_clean(job: Job, sp: str, dereverb: bool = True) -> int:
+    """去背景音：UVR5 分离人声（可选去混响）。
+
+    这是训练质量的关键一步——带 BGM 的素材会把伴奏学进音色。实测分离度约
+    18 dB（每 8 份人声仍混 1 份伴奏），所以分离后仍建议人工抽检片段。
+    """
     d = RAW / sp
-    srcs = [p for p in d.iterdir() if p.is_file() and p.suffix.lower() in ALLOWED]
+    srcs = [p for p in d.iterdir() if p.is_file() and p.suffix.lower() in ALLOWED
+            and not p.stem.endswith("_Vocals")]
     if not srcs:
-        job.log("[失败] 目录里没有音频文件")
+        job.log("[失败] 目录里没有原始音频")
         return 1
     src = sorted(srcs, key=lambda p: p.stat().st_size, reverse=True)[0]
     work = src
-    if src.suffix.lower() != ".wav":
-        job.step = "抽取音频"
-        out_wav = d / "source.wav"
+
+    # 非 wav 先抽音频（libsndfile 不支持 m4a/aac）
+    if work.suffix.lower() != ".wav":
+        wav = d / "source.wav"
         code = _run_cmd(job, [PY_TTS, str(LAB / "tools" / "video2audio.py"),
-                              "extract", "-i", str(src), "-o", str(out_wav), "--mono"], "抽取音频")
+                              "extract", "-i", str(work), "-o", str(wav), "--mono"], "抽取音频")
         if code != 0:
             return code
-        work = out_wav
+        work = wav
+
+    out_dir = d / "clean"
+    out_dir.mkdir(exist_ok=True)
+    code = _run_cmd(job, [PY_UVR, str(LAB / "tools" / "uvr5.py"),
+                          "separate", "-i", str(work), "-d", str(out_dir)], "分离人声/伴奏")
+    if code != 0:
+        return code
+
+    vocals = sorted(out_dir.glob("*Vocals*.wav"), key=lambda p: p.stat().st_size, reverse=True)
+    if not vocals:
+        job.log("[失败] 没有产出人声轨")
+        return 2
+    job.log(f"[检查] 人声轨: {vocals[0].name}")
+
+    if dereverb:
+        code = _run_cmd(job, [PY_UVR, str(LAB / "tools" / "uvr5.py"),
+                              "dereverb", "-i", str(vocals[0]), "-d", str(out_dir)], "去混响")
+        if code != 0:
+            job.log("[警告] 去混响失败，继续用人声轨（混响会被训练学进去）")
+        else:
+            dry = sorted(out_dir.glob("*No Reverb*.wav"), key=lambda p: p.stat().st_size, reverse=True)
+            if dry:
+                job.log(f"[检查] 干声: {dry[0].name}")
+
+    # 统一成 source.wav，供后续切分使用
+    best = sorted(out_dir.glob("*.wav"), key=lambda p: (
+        "No Reverb" not in p.name, -p.stat().st_size))[0]
+    final = d / "cleaned.wav"
+    shutil.copyfile(best, final)
+    job.log(f"[完成] 干净人声 -> {final.relative_to(LAB)}（源自 {best.name}）")
+    return 0
+
+
+def _stage_segments(job: Job, sp: str, max_len: float, min_len: float) -> int:
+    """按静音切分。优先用去背景音后的 cleaned.wav，否则用原始音频。"""
+    d = RAW / sp
+    cleaned = d / "cleaned.wav"
+    if cleaned.is_file():
+        work = cleaned
+        job.log(f"[输入] 使用已去背景音的 {cleaned.name}")
+    else:
+        srcs = [p for p in d.iterdir() if p.is_file() and p.suffix.lower() in ALLOWED
+                and not p.stem.endswith(("_Vocals", "_Instrumental")) and "agogue" not in p.name]
+        if not srcs:
+            job.log("[失败] 目录里没有音频文件")
+            return 1
+        work = sorted(srcs, key=lambda p: p.stat().st_size, reverse=True)[0]
+        if work.suffix.lower() != ".wav":
+            job.step = "抽取音频"
+            out_wav = d / "source.wav"
+            code = _run_cmd(job, [PY_TTS, str(LAB / "tools" / "video2audio.py"),
+                                  "extract", "-i", str(work), "-o", str(out_wav), "--mono"], "抽取音频")
+            if code != 0:
+                return code
+            work = out_wav
+        job.log("[提示] 未去背景音。带 BGM/混响的素材会把伴奏学进音色，建议先跑「去背景音」")
     seg = d / "segments"
     seg.mkdir(exist_ok=True)
     code = _run_cmd(job, [PY_TTS, str(LAB / "tools" / "split_silence.py"),
@@ -214,6 +276,26 @@ def _stage_segments(job: Job, sp: str, max_len: float, min_len: float) -> int:
     return 0
 
 
+def _find_list(sp: str) -> Path | None:
+    """定位 .list。
+
+    asr_annotate.py 把产物写进 <输出目录>/<speaker>/<speaker>.list，
+    而传入的 -i 是 segments/，所以实际落在 data/raw/<sp>/<sp>/<sp>.list。
+    不要硬编码单一位置——两个可能都查。
+    """
+    d = RAW / sp
+    cands = [
+        d / f"{sp}.list",
+        d / sp / f"{sp}.list",
+    ]
+    for c in cands:
+        if c.is_file() and c.stat().st_size > 0:
+            return c
+    # 兜底：任何深度的同名 list
+    found = sorted(d.rglob(f"{sp}.list"), key=lambda p: p.stat().st_size, reverse=True)
+    return found[0] if found else None
+
+
 def _stage_asr(job: Job, sp: str, lang: str) -> int:
     """.list 自动标注。ASR 在 .venv-asr 里，必须用那个解释器。"""
     seg = RAW / sp / "segments"
@@ -224,10 +306,11 @@ def _stage_asr(job: Job, sp: str, lang: str) -> int:
                           "-i", str(seg), "-s", sp, "-l", lang], "ASR 自动标注")
     if code != 0:
         return code
-    lst = RAW / sp / f"{sp}.list"
-    if not lst.is_file():
-        job.log("[失败] 没有产出 .list")
+    lst = _find_list(sp)
+    if not lst:
+        job.log(f"[失败] 没有产出 .list（在 {seg.parent} 下找过）")
         return 2
+    job.log(f"[定位] {lst.relative_to(LAB)}")
     n = sum(1 for ln in lst.read_text(encoding="utf-8", errors="replace").splitlines() if ln.strip())
     job.log(f"[检查] .list 共 {n} 条")
     if n < 5:
@@ -236,8 +319,8 @@ def _stage_asr(job: Job, sp: str, lang: str) -> int:
 
 
 def _stage_prepare(job: Job, sp: str) -> int:
-    lst = RAW / sp / f"{sp}.list"
-    if not lst.is_file():
+    lst = _find_list(sp)
+    if not lst:
         job.log("[失败] 缺少 .list（先跑标注）")
         return 1
     code = _run_cmd(job, [PY_TTS, str(LAB / "tools" / "train_pipeline.py"),
@@ -291,8 +374,8 @@ def _register_profile(job: Job, sp: str) -> None:
     ref_text = ""
     if cands:
         ref_audio = str(cands[0].relative_to(LAB)).replace("\\", "/")
-        lst = RAW / sp / f"{sp}.list"
-        if lst.is_file():
+        lst = _find_list(sp)
+        if lst:
             for ln in lst.read_text(encoding="utf-8", errors="replace").splitlines():
                 parts = ln.split("\t")
                 if len(parts) >= 4 and Path(parts[0]).stem == cands[0].stem:
@@ -322,7 +405,10 @@ def _workflow(job: Job, steps: list[str], opts: dict) -> None:
             if job.status == "cancelled":
                 return
             job.log(f"\n===== {st} =====")
-            if st == "segments":
+            if st == "clean":
+                # 可选步骤：只有用户显式勾选才在 steps 里出现
+                code = _stage_clean(job, sp, opts.get("dereverb", True))
+            elif st == "segments":
                 code = _stage_segments(job, sp, opts.get("max_len", 12.0), opts.get("min_len", 2.0))
             elif st == "asr":
                 code = _stage_asr(job, sp, opts.get("lang", "中文"))
@@ -355,10 +441,16 @@ def _workflow(job: Job, steps: list[str], opts: dict) -> None:
 @router.post("/start")
 def start(body: dict) -> dict:
     sp = _safe_speaker(body.get("speaker", ""))
+    # 默认流程不含 clean —— 去背景音是**可选**步骤，只有用户勾选才会出现在 steps 里。
+    # 素材本身已是干净干声时没必要跑（UVR5 有损，约 18 dB 分离度）。
     steps = body.get("steps") or ["segments", "asr", "prepare", "train"]
-    steps = [s for s in steps if s in ("segments", "asr", "prepare", "train")]
+    steps = [s for s in steps if s in ("clean", "segments", "asr", "prepare", "train")]
     if not steps:
         raise HTTPException(400, "没有可执行的步骤")
+    if "clean" in steps and "segments" not in steps:
+        raise HTTPException(400, "去背景音之后必须接切分（clean 的产物需要切成训练片段）")
+    # 允许从任意步骤续跑：对应的前置产物在磁盘上就会被复用。
+    # 首次任务由前端传完整 steps；重跑某一步只传那一步即可。
 
     with _lock:
         running = [j for j in JOBS.values() if j.status == "running"]
@@ -398,3 +490,84 @@ def cancel(jid: str) -> dict:
             job.log(f"[停止失败] {e}")
     job.ended = time.time()
     return {"cancelled": True}
+
+
+# ------------------------------------------------------------------ 音色删除
+
+def _voice_assets(name: str) -> list[dict]:
+    """列出某音色的全部干系资产（与 tools/delete_voice.py 同一套规则）。"""
+    import delete_voice as dv
+    import config_io
+    cfg = config_io.load(verbose=False)
+    out = []
+    for label, path in dv.collect(name, cfg, include_shared=False):
+        try:
+            rel = path.relative_to(LAB).as_posix()
+        except ValueError:
+            rel = str(path)
+        out.append({"label": label, "path": rel,
+                    "size": dv._fmt(dv._size(path)),
+                    "is_dir": path.is_dir()})
+    return out
+
+
+@router.get("/voice/{name}/assets")
+def voice_assets(name: str) -> dict:
+    """删除前预览：列出会删掉什么、总共释放多少。"""
+    import config_io
+    cfg = config_io.load(verbose=False)
+    if name not in cfg.get("profiles", {}):
+        raise HTTPException(404, f"没有这个音色: {name}")
+    import delete_voice as dv
+    assets = _voice_assets(name)
+    total_bytes = 0
+    for label, path in dv.collect(name, cfg, include_shared=False):
+        total_bytes += dv._size(path)
+    return {"ok": True, "speaker": name, "assets": assets,
+            "total": dv._fmt(total_bytes), "total_bytes": total_bytes}
+
+
+@router.delete("/voice/{name}")
+def voice_delete(name: str) -> dict:
+    """删除音色及其全部资产，profile 条目先备份到 _local/deleted/。"""
+    import config_io
+    import delete_voice as dv
+    cfg = config_io.load(verbose=False)
+    if name not in cfg.get("profiles", {}):
+        raise HTTPException(404, f"没有这个音色: {name}")
+    if len(cfg["profiles"]) <= 1:
+        raise HTTPException(400, "这是最后一个音色，删掉后就没有可用档案了")
+
+    # 有训练在跑时不允许删，避免删掉正在写的目录
+    with _lock:
+        running = [j for j in JOBS.values() if j.status == "running"]
+        if running:
+            raise HTTPException(409, f"有训练任务在跑（{running[0].speaker}），请等它结束再删")
+
+    items = dv.collect(name, cfg, include_shared=False)
+    total = sum(dv._size(p) for _, p in items)
+
+    backup = LAB / "_local" / "deleted"
+    backup.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    (backup / f"{name}.{stamp}.profile.json").write_text(
+        json.dumps(cfg["profiles"][name], ensure_ascii=False, indent=2), encoding="utf-8")
+
+    removed, errors = [], []
+    for label, path in items:
+        if not str(path.resolve()).startswith(str(LAB.resolve())):
+            errors.append(f"越界路径 {path}")
+            continue
+        try:
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+            removed.append(str(path.relative_to(LAB)))
+        except Exception as e:
+            errors.append(f"{path.name}: {type(e).__name__}")
+
+    del cfg["profiles"][name]
+    config_io.save(cfg)
+    return {"deleted": name, "removed": removed, "errors": errors,
+            "freed": dv._fmt(total), "remaining": list(cfg["profiles"])}

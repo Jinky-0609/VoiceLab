@@ -371,8 +371,15 @@ def index() -> HTMLResponse:
     return HTMLResponse(page.read_text(encoding="utf-8"))
 
 
-# ------------------------------------------------------------------ main
+# 训练面板路由（/api/train/*）。未装 python-multipart 时上传会失败，其余可用。
+try:
+    import train_api
+    app.include_router(train_api.router)
+except Exception as _e:      # 不让训练模块的问题拖垮合成功能
+    print(f"[警告] 训练面板未启用: {type(_e).__name__}: {_e}", flush=True)
 
+
+# ------------------------------------------------------------------ main
 def main() -> int:
     ap = argparse.ArgumentParser(description="VoiceLab 图形界面")
     ap.add_argument("--port", type=int, default=8765)
