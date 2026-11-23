@@ -155,7 +155,19 @@ def synth(cfg: dict, prof: dict, text: str, lang: str, out_path: Path, args) -> 
         sys.exit("[FATAL] 缺少参考文本（ref_text）。v3 模型不支持 ref_free，必须提供。")
 
     d = cfg.get("defaults", {})
-    engine = get_engine(cfg, prof["gpt"], prof["sovits"])
+    # --version v4：换用 v4 的 s2 基座（s1 与 v3 共用，无需更换）。
+    # 微调音色仍然可用——实测 zhongcheng 的 s1 + s2Gv4 正常出声。
+    want_ver = getattr(args, "gsv_version", None)
+    sovits = prof["sovits"]
+    if want_ver == "v4":
+        v4 = runtime_paths.resolve("models/pretrained/gsv-v4-pretrained/s2Gv4.pth")
+        if v4 and Path(v4).is_file():
+            sovits = str(v4)
+            print(f"[版本] v4 基座 {Path(sovits).name}", flush=True)
+        else:
+            sys.exit("[FATAL] 缺 v4 基座权重。运行 tools/fetch_models.py 下载 "
+                     "gsv-v4-pretrained/s2Gv4.pth")
+    engine = get_engine(cfg, prof["gpt"], sovits)
 
     attempts = 1 if args.no_guard else max(1, args.guard_attempts)
     rng = random.Random(args.seed if args.seed is not None else None)
@@ -287,6 +299,9 @@ def main() -> int:
                        help="情绪参考名（可重复，如 --emotion 开心 --emotion 激动）。"
                             "用 tools/emotions.py 登记；作为上游 aux 参考参与韵律融合。"
                             "v3 没有 emotion 参数，情绪完全由参考音频承载。")
+        p.add_argument("--version", dest="gsv_version", choices=["v3", "v4"],
+                       help="GPT-SoVITS 版本。v3=默认；v4 换用 s2Gv4 + 独立声码器"
+                            "（s1 与 v3 共用）。不指定则按 s2 权重文件名/魔数自动判断。")
         p.add_argument("--guard-attempts", type=int, default=2, help="语义守卫重试次数（默认 2）")
         p.add_argument("--no-guard", action="store_true", help="关闭语义坍缩守卫（仅排障用）")
 

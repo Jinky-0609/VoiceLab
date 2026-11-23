@@ -59,6 +59,19 @@ REDUNDANT = ["tf_model.h5", "flax_model.msgpack", "bigvgan_discriminator_optimiz
 FILE_TARGETS = [
     ("s1v3.ckpt", "lj1995/GPT-SoVITS", "s1v3.ckpt", 148),
     ("s2Gv3.pth", "lj1995/GPT-SoVITS", "s2Gv3.pth", 733),
+    # v4 基座。注意 s1 与 v3 共用 s1v3.ckpt（上游 TTS.py 的 v4 默认配置即如此），
+    # 只有 s2 换成 s2Gv4.pth，另需一个独立声码器 vocoder.pth。
+    ("gsv-v4-pretrained/s2Gv4.pth", "lj1995/GPT-SoVITS", "gsv-v4-pretrained/s2Gv4.pth", 733),
+    ("gsv-v4-pretrained/vocoder.pth", "lj1995/GPT-SoVITS", "gsv-v4-pretrained/vocoder.pth", 55),
+]
+
+# v4 的声码器引擎会按 "GPT_SoVITS/pretrained_models/gsv-v4-pretrained/vocoder.pth"
+# 这个相对路径去找（上游 TTS.py:init_vocoder），所以两个位置都要有。
+V4_MIRROR = [
+    ("models/pretrained/gsv-v4-pretrained/vocoder.pth",
+     "_src/GPT-SoVITS-main/GPT_SoVITS/pretrained_models/gsv-v4-pretrained/vocoder.pth"),
+    ("models/pretrained/gsv-v4-pretrained/s2Gv4.pth",
+     "_src/GPT-SoVITS-main/GPT_SoVITS/pretrained_models/gsv-v4-pretrained/s2Gv4.pth"),
 ]
 
 # 中文多音字模型 G2PW：上游以 zip 发布（XXXXRT/GPT-SoVITS-Pretrained）。
@@ -160,14 +173,19 @@ def _shutil_rmtree(p: Path) -> None:
 
 
 def fetch_single(name: str, repo: str, filename: str, approx_mb: int) -> bool:
-    """拉按单文件发布的基座权重到 models/pretrained/<name>。"""
+    """拉按单文件发布的基座权重到 models/pretrained/<name>。
+
+    name 可含子目录（如 gsv-v4-pretrained/s2Gv4.pth），下游会按 filename 的
+    相对结构落到对应子目录。
+    """
     dest = LAB / "models" / "pretrained" / name
     if dest.is_file() and dest.stat().st_size > int(approx_mb * 0.9) * 2**20:
         print(f"[{name}]  已在 {dest.relative_to(LAB)}（跳过）")
         return True
     dest.parent.mkdir(parents=True, exist_ok=True)
     print(f"[{name}]  <- {repo}/{filename} (~{approx_mb} MB)")
-    tmp = dest.parent
+    tmp = LAB / "models" / "pretrained"
+    tmp.mkdir(parents=True, exist_ok=True)
     if try_hf(repo, str(tmp), [filename]):
         got = tmp / filename
         if got.is_file() and got != dest:
@@ -345,6 +363,16 @@ def main() -> int:
             all_ok = all_ok and ok
         else:
             all_ok = fetch_single(name, repo, filename, mb) and all_ok
+
+    # ---- v4 权重镜像到上游目录（引擎按相对路径找 vocoder）----
+    if not args.check:
+        for src_rel, dst_rel in V4_MIRROR:
+            src = LAB / src_rel
+            dst = LAB / dst_rel
+            if src.is_file() and not dst.is_file():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(src, dst)
+                print(f"[v4] 镜像 {src_rel} -> {dst_rel}")
 
     # ---- 直链目标（fast_langdetect，缺失会在模型加载期崩）----
     print()

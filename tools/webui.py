@@ -94,6 +94,7 @@ class _Args:
         self.if_sr = False
         self.no_guard = False
         self.guard_attempts = 2
+        self.gsv_version = None      # None=自动（按 s2 文件判断）；"v4" 强制用 v4 基座
         self.__dict__.update(kw)
 
 
@@ -144,8 +145,12 @@ def api_config() -> dict:
         st = _profile_status(cfg, name)
         profiles.append({"name": name, **st})
     cur = _state["engine_info"]
+    v4_path = LAB / "models" / "pretrained" / "gsv-v4-pretrained" / "s2Gv4.pth"
+    voc = LAB / "_src" / "GPT-SoVITS-main" / "GPT_SoVITS" / "pretrained_models" / \
+          "gsv-v4-pretrained" / "vocoder.pth"
     return {
         "profiles": profiles,
+        "versions": {"v3": True, "v4": v4_path.is_file() and voc.is_file()},
         "languages": cfg.get("languages", []),
         "defaults": cfg.get("defaults", {}),
         "engine": cur,
@@ -289,6 +294,7 @@ def _run_job(jid: str, cfg: dict, pid: str, text: str, lang: str, opts: dict) ->
                      "sample_steps", "seed") if opts.get(k) is not None})
     args.no_guard = bool(opts.get("no_guard", False))
     args.guard_attempts = int(opts.get("guard_attempts", 2))
+    args.gsv_version = opts.get("gsv_version") or None
 
     fname = f"{time.strftime('%H%M%S')}_{jid}.wav"
     out = WEB_DIR / fname

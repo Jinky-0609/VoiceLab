@@ -152,6 +152,32 @@ float32 [-1,1]，守卫的 `saturated_audio` 规则专门兜这类错误。
 
 ---
 
+## 模型版本：v3 / v4
+
+两种基座都支持，**微调音色通用**（升级不需要重训）：
+
+| | v3 | v4 |
+|---|---|---|
+| s1（GPT） | `s1v3.ckpt` | **同一个文件**（上游 v4 默认配置即如此） |
+| s2（SoVITS） | `s2Gv3.pth` | `s2Gv4.pth` |
+| 声码器 | BigVGAN v2 | 额外独立 `vocoder.pth`（55MB） |
+| 选法 | 默认 | `--version v4` 或界面「高级 → 模型版本」 |
+
+```bash
+# 命令行
+python tools/voicelab.py speak -p myvoice -t "你好" --version v4
+
+# 界面：高级面板 → 模型版本 → v4
+```
+
+v4 权重（共 788MB）由 `tools/fetch_models.py` 统一管理，会同时镜像到
+`_src/.../pretrained_models/gsv-v4-pretrained/`（引擎按相对路径找 vocoder）。
+
+实测（RTX 5060 Laptop 8GB）：同一音色 v3 与 v4 都能正常出声，
+v4 的 RTF 6.7（比 v3 的 14.5 更快）。v4 权重缺失时界面会自动禁用该选项并提示下载。
+
+---
+
 ## 方案 3：微调专属音色（v3 LoRA）
 
 ### 完整流程
