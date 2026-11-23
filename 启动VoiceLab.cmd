@@ -3,11 +3,8 @@ chcp 65001 >nul
 title VoiceLab
 cd /d "%~dp0"
 
-echo.
-echo   VoiceLab 正在启动...
-echo.
-
 if not exist ".venv-tts\Scripts\python.exe" (
+    echo.
     echo   [错误] 找不到 .venv-tts
     echo   请先运行 install.ps1 安装，或按 docs\环境重建.md 手动部署。
     echo.
@@ -22,13 +19,12 @@ if not exist "config.json" (
     )
 )
 
-echo   浏览器会自动打开 http://127.0.0.1:8765
+echo.
+echo   VoiceLab 启动中...
 echo   关闭本窗口即停止服务。
 echo.
-echo  ==========================================
-echo.
 
-".venv-tts\Scripts\python.exe" tools\webui.py
+".venv-tts\Scripts\python.exe" tools\launch.py
 
 echo.
 echo   服务已停止。
