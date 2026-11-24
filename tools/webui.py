@@ -111,29 +111,43 @@ def _profile_status(cfg: dict, name: str) -> dict:
     if not prof:
         return {"ok": False, "reason": "未知音色"}
     p = dict(prof)
+
+    # 权重是硬前提：没有 gpt/sovits 这个档案根本没法工作
     missing = []
-    for key, label in (("gpt", "GPT 权重"), ("sovits", "SoVITS 权重"),
-                       ("ref_audio", "参考音频")):
+    for key, label in (("gpt", "GPT 权重"), ("sovits", "SoVITS 权重")):
         v = p.get(key)
         if not v:
             missing.append(f"{label}未配置")
         elif runtime_paths.resolve(v) is None or not Path(runtime_paths.resolve(v)).is_file():
             missing.append(f"{label}缺失")
+
+    # 参考素材：对**零样本**只是"默认值"，不是硬条件——用户完全可以在
+    # 合成时用「高级 → 参考音频」临时指定。所以这里不判为不可用，
+    # 只标记 needs_ref，前端提示"选好音色后拖入参考音频"即可。
+    # （曾经把缺失当成不可用，导致零样本整体变灰不可选，是设计错误。）
+    needs_ref = False
+    ra = p.get("ref_audio")
+    if not ra or runtime_paths.resolve(ra) is None or not Path(runtime_paths.resolve(ra)).is_file():
+        needs_ref = True
     rt = p.get("ref_text")
     if rt:
         rp = runtime_paths.resolve(rt)
         is_file = bool(rp and Path(rp).is_file())
         if not is_file and len(str(rt)) > 120:
-            missing.append("参考文本文件缺失")   # 长路径才当文件看待
+            needs_ref = True                 # 长路径才当文件看待
     if str(rt or "").strip().startswith("（"):
-        missing.append("参考文本是占位符，需填逐字内容")
+        needs_ref = True
+
+    is_zeroshot = "pretrained" in str(p.get("gpt", "")).lower()
+    if not is_zeroshot and needs_ref:
+        # 微调音色必须自带参考音频才能定音色，否则等于没音色
+        missing.append("参考音频缺失")
+
     reason = "、".join(missing)
-    # 零样本缺素材时给可操作的引导，而不是干巴巴一句"参考音频缺失"
-    if missing and "pretrained" in str(p.get("gpt", "")).lower():
-        reason = ("零样本需要一段参考音频：把自己 3~10 秒的干声拖进"
-                  "「高级 → 参考音频」，或放到 data/refs/my_ref.wav 并配同名 .txt")
     return {
         "ok": not missing,
+        "needs_ref": needs_ref,
+        "is_zeroshot": is_zeroshot,
         "reason": reason,
         "ref_lang": p.get("ref_lang", ""),
         "desc": p.get("desc", ""),

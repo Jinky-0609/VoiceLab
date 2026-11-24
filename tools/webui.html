@@ -862,10 +862,21 @@ function fillSelect(el, items, val){
 
 function renderConfig(cfg){
   state.cfg = cfg;
-  const profs = cfg.profiles.map(p=>({
-    v:p.name, t:p.name, disabled:!p.ok,
-    title: p.ok ? (p.desc||"") : ("不可用："+p.reason)
-  }));
+  const profs = cfg.profiles.map(p=>{
+    let label = p.name;
+    if(p.ok && p.needs_ref) label += " — 需指定参考音频";
+    return {
+      v:p.name,
+      t: p.ok ? label : (p.name + " — 不可用"),
+      disabled: !p.ok,
+      title: p.ok ? (p.needs_ref
+              ? "选好音色后，在「高级 → 参考音频」拖入你自己的音频"
+              : (p.desc||""))
+            : ("不可用："+p.reason),
+      needs_ref: !!p.needs_ref,
+      is_zeroshot: !!p.is_zeroshot
+    };
+  });
   const saved = JSON.parse(localStorage.getItem(DRAFT)||"{}");
   const first = profs.find(p=>!p.disabled);
   fillSelect($("#profile"), profs.length?profs:[{v:"",t:"（无可用音色）",disabled:true}],
@@ -921,6 +932,16 @@ function paintProfileHint(){
   const tgt = $("#lang").value;
   const w = $("#langWarn");
   const mismatch = !!(refLang && tgt && refLang !== tgt);
+
+  // 零样本还没指定参考音频：引导用户去拖入（比让他点了合成才报错好）
+  if (p && p.ok && p.needs_ref) {
+    $("#langWarnText").innerHTML =
+      '<b>零样本需要一段参考音频</b>：打开上方「高级」，把 3~10 秒的干声拖进'
+      + '「参考音频」，或在命令行用 <code>-r</code> 指定。没有参考音频就没有音色。';
+    $("#langWarn").classList.add("on");
+    return;
+  }
+
   if (mismatch && !state.langDismissed && !$("#no_guard").checked) {
     $("#langWarnText").innerHTML =
       `参考音频是<b>${esc(refLang)}</b>，目标是<b>${esc(tgt)}</b>。跨语言会<b>概率性</b>触发语义坍缩（乱音），`
@@ -966,6 +987,14 @@ function buildOpts(){
 
 async function speak(){
   if($("#goBtn").disabled) return;
+  // 零样本缺参考音频时提前拦下，给出可操作提示
+  const cur = currentProfile();
+  if(cur && cur.ok && cur.needs_ref){
+    toast("零样本还差一段参考音频：打开「高级」拖入即可", "err", 5200);
+    document.getElementById("advBtn").click();
+    document.getElementById("adv").classList.add("open");
+    return;
+  }
   const text=$("#text").value.trim();
   if(text.length>MAXLEN){ toast("文本超过 2000 字，请分批合成","err"); return; }
   const btn=$("#goBtn"); btn.disabled=true;
