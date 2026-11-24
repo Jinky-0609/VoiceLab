@@ -46,6 +46,7 @@ PYTHON = str(runtime_paths.resolve(CONFIG.get("python"))) or runtime_paths.proje
 
 PRETRAINED_S1 = LAB / "models" / "pretrained" / "s1v3.ckpt"
 PRETRAINED_S2G = LAB / "models" / "pretrained" / "s2Gv3.pth"
+PRETRAINED_S2G_V4 = LAB / "models" / "pretrained" / "gsv-v4-pretrained" / "s2Gv4.pth"
 PRE_ROOT = REPO / "GPT_SoVITS" / "pretrained_models"
 BERT = PRE_ROOT / "chinese-roberta-wwm-ext-large"
 CNHUBERT = PRE_ROOT / "chinese-hubert-base"
@@ -194,12 +195,23 @@ def stage_train_s1(speaker: str, exp_dir: Path, epochs: int, batch: int) -> Path
     return out_dir
 
 
-def stage_train_s2(speaker: str, exp_dir: Path, epochs: int, batch: int, s1_ckpt: str) -> Path:
+def stage_train_s2(speaker: str, exp_dir: Path, epochs: int, batch: int, s1_ckpt: str,
+                   version: str = "v3") -> Path:
+    """训练 s2 LoRA。
+
+    version=v4 时换用 s2Gv4 基座；上游 s2_train_v3_lora.py:105-106 会按
+    hps.model.version 自动选 TextAudioSpeakerLoaderV3/V4，这里只需对齐版本与基座。
+    """
+    if version not in ("v3", "v4"):
+        die(f"不支持的版本: {version}（只能 v3 / v4）")
+    s2_base = PRETRAINED_S2G_V4 if version == "v4" else PRETRAINED_S2G
+    if not s2_base.is_file():
+        die(f"缺 {version} 的 s2 基座: {s2_base}")
     data = json.loads(S2CONFIG.read_text(encoding="utf-8"))
     data["train"]["batch_size"] = batch
     data["train"]["epochs"] = epochs
     data["train"]["text_low_lr_rate"] = 0.4
-    data["train"]["pretrained_s2G"] = str(PRETRAINED_S2G)
+    data["train"]["pretrained_s2G"] = str(s2_base)
     data["train"]["pretrained_s2D"] = ""
     data["train"]["if_save_latest"] = True
     data["train"]["if_save_every_weights"] = True
@@ -209,7 +221,7 @@ def stage_train_s2(speaker: str, exp_dir: Path, epochs: int, batch: int, s1_ckpt
     data["train"]["gpu_numbers"] = "0"
     data["train"]["grad_ckpt"] = False  # batch 调小后 6GB 显存够用，开梯度检查点反而更慢
     data["train"]["lora_rank"] = LORA_RANK
-    data["model"]["version"] = "v3"
+    data["model"]["version"] = version
     # 关键：exp_dir 必须是「数据集目录」本身，不能另开子目录。
     # module/data_utils.py:288-293 会在 exp_dir 下找 2-name2text.txt / 4-cnhubert / 5-wav32k，
     # 上游 webui.py:535 也是 data.exp_dir = s2_ckpt_dir = exp_root/exp_name。
@@ -217,12 +229,12 @@ def stage_train_s2(speaker: str, exp_dir: Path, epochs: int, batch: int, s1_ckpt
     data["s2_ckpt_dir"] = str(exp_dir)
     data["save_weight_dir"] = str(LAB / "models" / "voices" / speaker / "s2")
     data["name"] = speaker
-    data["version"] = "v3"
+    data["version"] = version
 
-    cfg = exp_dir / "tmp_s2_v3.json"
+    cfg = exp_dir / f"tmp_s2_{version}.json"
     cfg.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     run([PYTHON, "-s", "GPT_SoVITS/s2_train_v3_lora.py", "--config", str(cfg)],
-        {"_CUDA_VISIBLE_DEVICES": "0", "hz": "25hz"}, f"5/5 s2_train_v3_lora ({epochs} epochs, rank={LORA_RANK})")
+        {"_CUDA_VISIBLE_DEVICES": "0", "hz": "25hz"}, f"5/5 s2_train_v3_lora [{version}] ({epochs} epochs, rank={LORA_RANK})")
     return exp_dir
 
 
@@ -423,7 +435,13 @@ def main() -> int:
     ap.add_argument("--epochs-s2", type=int, default=8, help="SoVITS LoRA 轮数（默认 8）")
     ap.add_argument("--batch-s1", type=int, default=8)
     ap.add_argument("--batch-s2", type=int, default=4)
+    ap.add_argument("--model-version", choices=["v3", "v4"], default="v3",
+                    help="训练目标架构（默认 v3）。选 v4 会换用 s2Gv4 基座，"
+                         "产出的 LoRA 魔数为 b'04'，该音色之后才能在界面里选 v4。")
     ap.add_argument("--s1-ckpt", help="train-only 时指定已有的 GPT 权重")
+    ap.add_argument("--s2-only", action="store_true",
+                    help="只训 s2，复用已有 s1 权重。换 --model-version 时用，"
+                         "省掉没必要的 s1 重训。")
     ap.add_argument(
         "--keep-epochs",
         type=int,
@@ -449,8 +467,16 @@ def main() -> int:
     if not (exp_dir / "2-name2text.txt").is_file():
         die(f"数据未准备好，缺 {exp_dir / '2-name2text.txt'}（先跑 prepare）")
 
-    s1_dir = stage_train_s1(args.speaker, exp_dir, args.epochs_s1, args.batch_s1)
-    s2_dir = stage_train_s2(args.speaker, exp_dir, args.epochs_s2, args.batch_s2, args.s1_ckpt or "")
+    if args.s2_only:
+        # 复用已有 s1，只训 s2（换 --model-version 时常用；s1 两个版本共用）
+        s1_dir = LAB / "models" / "voices" / args.speaker / "s1"
+        if not list(s1_dir.glob("*.ckpt")):
+            die(f"--s2-only 需要已有 s1 权重，但 {s1_dir} 里没有 .ckpt")
+        print(f"[跳过] s1 训练，复用 {s1_dir}", flush=True)
+    else:
+        s1_dir = stage_train_s1(args.speaker, exp_dir, args.epochs_s1, args.batch_s1)
+    s2_dir = stage_train_s2(args.speaker, exp_dir, args.epochs_s2, args.batch_s2,
+                            args.s1_ckpt or "", version=args.model_version)
     collect(args.speaker, s1_dir, s2_dir, list_path)
 
     # 训练完立刻清掉中间历元，避免像以前那样每音色堆 4.7 GB。
