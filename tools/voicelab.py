@@ -36,6 +36,22 @@ CONFIG_PATH = LAB / "config.json"
 OUT_DIR = LAB / "out"
 
 
+def _sovits_version(sovits_path: str) -> str:
+    """从 .pth 魔数判版本（与 tts_engine._detect_version 同规则）。"""
+    vmap = {b"03": "v3", b"04": "v4", b"05": "v2Pro", b"06": "v2ProPlus",
+            b"07": "v5dev", b"08": "v5turbo"}
+    try:
+        with open(sovits_path, "rb") as f:
+            return vmap.get(f.read(2), "v3")
+    except OSError:
+        return "v3"
+
+
+def _is_pretrained_profile(p: dict) -> bool:
+    """纯预训练对（零样本）才允许换基座。"""
+    return "pretrained" in str(p.get("gpt", "")).lower()
+
+
 # ---------------------------------------------------------------- config
 
 def load_config() -> dict:
@@ -190,18 +206,45 @@ def synth(cfg: dict, prof: dict, text: str, lang: str, out_path: Path, args) -> 
         sys.exit("[FATAL] 缺少参考文本（ref_text）。v3 模型不支持 ref_free，必须提供。")
 
     d = cfg.get("defaults", {})
-    # --version v4：换用 v4 的 s2 基座（s1 与 v3 共用，无需更换）。
-    # 微调音色仍然可用——实测 zhongcheng 的 s1 + s2Gv4 正常出声。
+    # 版本选择。
+    #
+    # 关键约束（踩过的坑）：微调音色的 .pth 自带版本标记，且**绑定了它训练时的
+    # 基座**。本项目的音色全部是 v3 训练（魔数 b'03'），如果把 base 换成
+    # s2Gv4 而不重训 LoRA，就是"v4 架构 + v3 微调权重"的错配，输出会有明显的
+    # 电音/失真。所以这里不允许跨版本替换微调音色的基座，只做明确提示。
+    #
+    # 零样本（纯预训练对）没有 LoRA 绑定，才能真正在 v3/v4 之间切换做对比。
     want_ver = getattr(args, "gsv_version", None)
     sovits = prof["sovits"]
-    if want_ver == "v4":
-        v4 = runtime_paths.resolve("models/pretrained/gsv-v4-pretrained/s2Gv4.pth")
-        if v4 and Path(v4).is_file():
-            sovits = str(v4)
-            print(f"[版本] v4 基座 {Path(sovits).name}", flush=True)
-        else:
-            sys.exit("[FATAL] 缺 v4 基座权重。运行 tools/fetch_models.py 下载 "
-                     "gsv-v4-pretrained/s2Gv4.pth")
+    own_ver = _sovits_version(sovits)
+
+    if want_ver and want_ver != own_ver:
+        if own_ver != "v3" or not _is_pretrained_profile(prof):
+            sys.exit(
+                f"[FATAL] 该音色的权重是 {own_ver} 版本（{Path(sovits).name}），"
+                f"不能直接当 {want_ver} 用。\n"
+                f"        微调音色的 LoRA 与训练时的基座架构绑定，跨版本会失真。\n"
+                f"        想看 {want_ver} 效果：用 zeroshot 音色（纯预训练）再选 {want_ver}，\n"
+                f"        或按新版本重新训练该音色。"
+            )
+        # 纯预训练对：允许换基座做对比
+        if want_ver == "v4":
+            p = runtime_paths.resolve("models/pretrained/gsv-v4-pretrained/s2Gv4.pth")
+            voc = LAB / "_src" / "GPT-SoVITS-main" / "GPT_SoVITS" / "pretrained_models" / \
+                  "gsv-v4-pretrained" / "vocoder.pth"
+            if not (p and Path(p).is_file()):
+                sys.exit("[FATAL] 缺 v4 基座权重。运行 tools/fetch_models.py 下载 "
+                         "gsv-v4-pretrained/s2Gv4.pth")
+            if not voc.is_file():
+                sys.exit("[FATAL] 缺 v4 声码器 vocoder.pth。运行 tools/fetch_models.py")
+            sovits = str(p)
+            print(f"[版本] {want_ver} 基座 {Path(p).name}", flush=True)
+
+    if want_ver:
+        # 零样本的"权重版本"是它引用的预训练基座，不是音色自身的微调版本
+        basis = "零样本预训练基座" if _is_pretrained_profile(prof) else "该音色微调版本"
+        print(f"[版本] 使用 {want_ver}（{basis} {own_ver}）", flush=True)
+
     engine = get_engine(cfg, prof["gpt"], sovits)
 
     attempts = 1 if args.no_guard else max(1, args.guard_attempts)

@@ -638,7 +638,8 @@
           <select id="ref_lang"></select></div>
         <div class="field"><label for="gsvVersion">模型版本</label>
           <select id="gsvVersion">
-            <option value="">自动（按权重判断）</option>
+            <option value="">自动（按音色权重判断）</option>
+            <option value="v3">v3（s2Gv3 + BigVGAN）</option>
             <option value="v4">v4（s2Gv4 + 独立声码器）</option>
           </select></div>
         <div class="field" style="justify-content:flex-end">
@@ -885,17 +886,22 @@ function renderConfig(cfg){
   fillSelect($("#lang"), cfg.languages.map(l=>({v:l,t:l})), saved.lang||"中文");
   fillSelect($("#ref_lang"), [{v:"",t:"（跟随音色）"}].concat(cfg.languages.map(l=>({v:l,t:l}))), saved.ref_lang||"");
 
-  // v4 依赖额外权重；缺失就禁用该选项并说明原因
+  // 版本选项：v4 需要权重；且只有**零样本**才能在 v3/v4 之间切换
+  // （微调音色的 LoRA 与训练基座绑定，跨版本会失真）
   const vsel = $("#gsvVersion");
   if(vsel){
     const v4ok = cfg.versions && cfg.versions.v4;
-    const opt = [...vsel.options].find(o=>o.value==="v4");
-    if(opt){
-      opt.disabled = !v4ok;
-      opt.textContent = v4ok ? "v4（s2Gv4 + 独立声码器）"
-                             : "v4 — 未安装权重（跑 fetch_models.py）";
-    }
+    ['v3','v4'].forEach(v=>{
+      const opt = [...vsel.options].find(o=>o.value===v);
+      if(!opt) return;
+      if(v === "v4"){
+        opt.disabled = !v4ok;
+        opt.textContent = v4ok ? "v4（s2Gv4 + 独立声码器）"
+                               : "v4 — 未安装权重（跑 fetch_models.py）";
+      }
+    });
     if(!v4ok && vsel.value==="v4") vsel.value = "";
+    paintVersionHint(cfg);
   }
 
   const d = cfg.defaults||{};
@@ -924,6 +930,27 @@ function effectiveRef(){
   const p = currentProfile();
   const cfgp = state.cfg && state.cfg.profiles.find(x => x.name === ($("#profile").value));
   return (cfgp && cfgp._ref_audio) || "";
+}
+
+function paintVersionHint(cfg){
+  // 微调音色只能用它自己的那个版本；跨版本要重训
+  const sel = document.getElementById("gsvVersion");
+  if(!sel) return;
+  const p = currentProfile();
+  const isZs = p && p.is_zeroshot;
+  ['v3','v4'].forEach(v=>{
+    const opt = [...sel.options].find(o=>o.value===v);
+    if(!opt) return;
+    if(v === "v4" && !(cfg && cfg.versions && cfg.versions.v4)) return;
+    opt.disabled = !isZs ? true : (v === "v4" ? !(cfg && cfg.versions && cfg.versions.v4) : false);
+    if(!isZs){
+      opt.title = "该音色是微调产物，LoRA 与训练基座绑定；想换版本需重新训练，"
+                + "或用 zeroshot 做对比测试";
+    } else {
+      opt.title = "";
+    }
+  });
+  if(!isZs) sel.value = "";
 }
 
 function paintProfileHint(){
@@ -1185,6 +1212,7 @@ $("#text").addEventListener("keydown", e=>{
 });
 $("#profile").addEventListener("change", ()=>{
   state.langDismissed = false;   // 换音色视野清零
+  if(state.cfg) paintVersionHint(state.cfg);
   paintProfileHint(); saveDraft();
 });
 ["lang","ref_lang","no_guard"].forEach(id=>$("#"+id).addEventListener("change", ()=>{

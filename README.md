@@ -170,6 +170,11 @@ python tools/voicelab.py speak -p myvoice -t "你好" --version v4
 # 界面：高级面板 → 模型版本 → v4
 ```
 
+**⚠️ 微调音色不能跨版本**：音色的 LoRA 与它训练时的基座架构绑定。
+本项目的音色都是 v3 训练（`.pth` 魔数 `b"03"`），把基座换成 v4 而不重训，
+输出会有明显电音/失真。程序会拒绝这种错配并提示。要用 v4 必须：
+① 用 `zeroshot` 做纯预训练对比测试；或 ② 按 v4 重新训练该音色。
+
 v4 权重（共 788MB）由 `tools/fetch_models.py` 统一管理，会同时镜像到
 `_src/.../pretrained_models/gsv-v4-pretrained/`（引擎按相对路径找 vocoder）。
 
