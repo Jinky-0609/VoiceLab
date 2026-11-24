@@ -151,6 +151,8 @@ def _profile_status(cfg: dict, name: str) -> dict:
         "reason": reason,
         "ref_lang": p.get("ref_lang", ""),
         "desc": p.get("desc", ""),
+        # 档案自带的参考音频（相对路径），前端用它判断"界面没填时是否还有默认值"
+        "_ref_audio": (p.get("ref_audio") or "") if not needs_ref else "",
     }
 
 

@@ -864,6 +864,7 @@ function renderConfig(cfg){
   state.cfg = cfg;
   const profs = cfg.profiles.map(p=>{
     let label = p.name;
+    // 注意：这里只在**初始渲染**时决定文案；用户拖入后由 refreshProfileLabels() 更新
     if(p.ok && p.needs_ref) label += " — 需指定参考音频";
     return {
       v:p.name,
@@ -916,6 +917,15 @@ function currentProfile(){
   if(!state.cfg) return null;
   return state.cfg.profiles.find(p=>p.name===$("#profile").value) || null;
 }
+function effectiveRef(){
+  // 界面「高级 → 参考音频」里填/拖入的路径优先；否则用音色档案自带的
+  const typed = ($("#ref_audio") && $("#ref_audio").value || "").trim();
+  if (typed) return typed;
+  const p = currentProfile();
+  const cfgp = state.cfg && state.cfg.profiles.find(x => x.name === ($("#profile").value));
+  return (cfgp && cfgp._ref_audio) || "";
+}
+
 function paintProfileHint(){
   const p=currentProfile();
   const go=$("#goBtn");
@@ -933,8 +943,10 @@ function paintProfileHint(){
   const w = $("#langWarn");
   const mismatch = !!(refLang && tgt && refLang !== tgt);
 
-  // 零样本还没指定参考音频：引导用户去拖入（比让他点了合成才报错好）
-  if (p && p.ok && p.needs_ref) {
+  // 零样本还没指定参考音频：只在**界面里也没有**时才提示。
+  // 用户拖进来之后必须立刻消失，否则会像"拖了没生效"（已踩过）。
+  const hasRefNow = !!effectiveRef();
+  if (p && p.ok && p.needs_ref && !hasRefNow) {
     $("#langWarnText").innerHTML =
       '<b>零样本需要一段参考音频</b>：打开上方「高级」，把 3~10 秒的干声拖进'
       + '「参考音频」，或在命令行用 <code>-r</code> 指定。没有参考音频就没有音色。';
@@ -989,7 +1001,7 @@ async function speak(){
   if($("#goBtn").disabled) return;
   // 零样本缺参考音频时提前拦下，给出可操作提示
   const cur = currentProfile();
-  if(cur && cur.ok && cur.needs_ref){
+  if(cur && cur.ok && cur.needs_ref && !effectiveRef()){
     toast("零样本还差一段参考音频：打开「高级」拖入即可", "err", 5200);
     document.getElementById("advBtn").click();
     document.getElementById("adv").classList.add("open");
@@ -1180,7 +1192,15 @@ $("#profile").addEventListener("change", ()=>{
   state.langDismissed = false;
   paintProfileHint(); saveDraft();
 }));
-document.querySelectorAll(".adv input,.adv select").forEach(el=>el.addEventListener("change", saveDraft));
+document.querySelectorAll(".adv input,.adv select").forEach(el=>el.addEventListener("change", ()=>{
+  saveDraft();
+  // 参考音频/文本变化会影响零样本可用性提示
+  if(el.id === "ref_audio" || el.id === "ref_text") paintProfileHint();
+}));
+["ref_audio","ref_text"].forEach(id=>{
+  const el = document.getElementById(id);
+  if(el) el.addEventListener("input", ()=>paintProfileHint());
+});
 $("#clearBtn").addEventListener("click", ()=>{ $("#text").value=""; syncText(); $("#text").focus(); });
 $("#advBtn").addEventListener("click", ()=>{
   state.advOpen=!state.advOpen;
@@ -1237,6 +1257,8 @@ $("#warmBtn").addEventListener("click", async ()=>{
       say(bits.join(" · ") + (d.warning ? " —— " + d.warning : ""),
           d.warning ? "warn" : "ok");
       saveDraft && saveDraft();
+      // 关键：拖入成功后要立刻重算提示，否则用户仍看到"缺少参考音频"
+      if (typeof paintProfileHint === "function") paintProfileHint();
     }catch(e){
       say("失败：" + e.message, "err");
     }
