@@ -288,6 +288,23 @@ class TTSInferencer:
         old_cwd = os.getcwd()
         os.chdir(REPO)
         try:
+            # 保存主参考波形：aux 加载会覆盖 prompt_cache['raw_audio']
+            # （TTS.py:883），而 mel 参考读的正是它（TTS.py:1847）。
+            # 不保存会在本次合成中与 refer_audio_spec 错配（叠层/回声），
+            # 且残留污染下一次合成。实测：主参考 254272 采样，
+            # 传 aux 后 raw_audio 变 128000（= aux 长度）。
+            cache = getattr(self.tts, 'prompt_cache', None)
+            primary_raw = None
+            primary_sr = None
+            if isinstance(cache, dict) and aux:
+                _ra = cache.get('raw_audio')
+                if _ra is not None:
+                    try:
+                        primary_raw = _ra.detach().clone()
+                        primary_sr = cache.get('raw_sr')
+                    except Exception:
+                        primary_raw = None
+
             for item in self.tts.run(inputs):
                 # 非流式时只 yield 一次 (sr, ndarray)
                 sr, audio = item[0], item[1]
@@ -303,6 +320,14 @@ class TTSInferencer:
                 return sr, a
         finally:
             os.chdir(old_cwd)
+            # 恢复主参考：aux 加载会覆盖 raw_audio（TTS.py:883），
+            # 不恢复会污染下一次合成（表现为音色漂移/叠层）。
+            if primary_raw is not None and isinstance(cache, dict):
+                try:
+                    cache["raw_audio"] = primary_raw
+                    cache["raw_sr"] = primary_sr
+                except Exception:
+                    pass
 
         raise RuntimeError("TTS.run 没有返回音频")
 
