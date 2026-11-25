@@ -96,6 +96,9 @@ class _Args:
         self.no_guard = False
         self.guard_attempts = 2
         self.gsv_version = None      # None=自动（按 s2 文件判断）；"v4" 强制用 v4 基座
+        self.emotion = None          # 情绪名（已在 data/emotions 里登记的）
+        self.prosody = None          # 参数化情绪预设（不需要素材）
+        self.prosody_strength = 1.0
         self.__dict__.update(kw)
 
 
@@ -338,6 +341,122 @@ def api_emotion_del(profile: str, name: str) -> dict:
     return {"removed": name}
 
 
+# ------------------------------------------------------------------ 自动情绪
+
+@app.post("/api/auto_emotion")
+def api_auto_emotion(body: dict) -> dict:
+    """文本按句切分 + 自动判情绪，返回可编辑的分段表。
+
+    实验性功能：规则+词典判定，允许（也鼓励）前端手动纠正每一句的情绪。
+    """
+    import auto_emotion
+    import emotions
+    text = (body.get("text") or "").strip()
+    profile = body.get("profile") or ""
+    if not text:
+        raise HTTPException(400, "文本为空")
+    max_chars = int(body.get("max_chars") or 60)
+    max_chars = max(20, min(max_chars, 300))
+
+    avail = list(emotions.load(profile).keys()) if profile else []
+    segs = auto_emotion.plan(text, avail, max_chars)
+    return {"segments": segs, "available": avail, "profile": profile}
+
+
+@app.post("/api/emotion_render")
+def api_emotion_render(body: dict) -> dict:
+    """按「每句一个情绪」的方案逐段合成，再交叉淡入拼接成一整条。
+
+    body: {profile, segments:[{text, emotion, lang?}], opts?}
+    逐段都过语义守卫；任何一段失败会记录并跳过，最后报告成功率。
+    """
+    import auto_emotion
+    import emotions
+    import soundfile as sf
+    import voicelab
+
+    cfg = config_io.load()
+    pid = body.get("profile", "")
+    segs = body.get("segments") or []
+    if pid not in cfg["profiles"]:
+        raise HTTPException(400, "未知音色")
+    if not segs:
+        raise HTTPException(400, "没有分段")
+
+    st = _profile_status(cfg, pid)
+    if not st["ok"]:
+        raise HTTPException(400, f"该音色暂不可用：{st['reason']}")
+
+    jid = uuid.uuid4().hex[:8]
+    BATCH_JOBS[jid] = {"id": jid, "status": "running", "done": 0,
+                       "total": len(segs), "errors": [], "started": time.time(),
+                       "zip": None, "kind": "emotion"}
+
+    def worker():
+        job = BATCH_JOBS[jid]
+        prof_vo = dict(cfg["profiles"][pid])
+        for k in ("gpt", "sovits", "ref_audio", "ref_text"):
+            if prof_vo.get(k):
+                prof_vo[k] = str(runtime_paths.resolve(prof_vo[k]))
+
+        opts = body.get("opts") or {}
+        args = _Args(**{k: opts.get(k) for k in
+                        ("how_to_cut", "top_k", "top_p", "temperature", "speed",
+                         "sample_steps", "seed") if opts.get(k) is not None})
+        args.no_guard = bool(opts.get("no_guard", False))
+        args.guard_attempts = int(opts.get("guard_attempts", 2))
+        args.gsv_version = opts.get("gsv_version") or None
+        args.prosody = opts.get("prosody") or None
+        args.prosody_strength = float(opts.get("prosody_strength") or 1.0)
+
+        outdir = WEB_DIR / f"emo_{jid}"
+        outdir.mkdir(parents=True, exist_ok=True)
+        made: list[Path] = []
+
+        with _lock:
+            for i, s in enumerate(segs, 1):
+                if job["status"] == "cancelled":
+                    break
+                text = (s.get("text") or "").strip()
+                if not text:
+                    job["done"] = i
+                    continue
+                emo = (s.get("emotion") or "").strip()
+                au = None
+                if emo:
+                    got = emotions.resolve(pid, [emo])
+                    if got:
+                        au = [g["audio"] for g in got]
+                if au:
+                    prof_vo["aux_ref_audio_paths"] = au
+                else:
+                    prof_vo.pop("aux_ref_audio_paths", None)
+                seg_out = outdir / f"{i:03d}.wav"
+                try:
+                    voicelab.synth(cfg, prof_vo, text, s.get("lang") or "中文",
+                                   seg_out, args)
+                    made.append(seg_out)
+                except Exception as e:
+                    job["errors"].append({"i": i, "text": text[:30],
+                                          "error": f"{type(e).__name__}: {str(e)[:120]}"})
+                job["done"] = i
+
+        if made:
+            final = WEB_DIR / f"emo_{jid}.wav"
+            try:
+                auto_emotion.concat_with_crossfade(made, final)
+                job["zip"] = f"/audio/{final.name}"
+                job["segments_made"] = len(made)
+            except Exception as e:
+                job["errors"].append({"i": 0, "text": "", "error": f"拼接失败: {e}"})
+
+        job["status"] = "cancelled" if job["status"] == "cancelled" else "done"
+        job["elapsed"] = round(time.time() - job["started"], 1)
+
+    threading.Thread(target=worker, daemon=True).start()
+    return {"job": jid, "total": len(segs)}
+
+
 # ------------------------------------------------------------------ 长文本分段
 
 @app.post("/api/split")
@@ -429,6 +548,8 @@ def api_batch(body: dict) -> dict:
         args.no_guard = bool(opts.get("no_guard", False))
         args.guard_attempts = int(opts.get("guard_attempts", 2))
         args.gsv_version = opts.get("gsv_version") or None
+        args.prosody = opts.get("prosody") or None
+        args.prosody_strength = float(opts.get("prosody_strength") or 1.0)
 
         outdir = WEB_DIR / f"batch_{jid}"
         outdir.mkdir(parents=True, exist_ok=True)
@@ -714,6 +835,23 @@ def _run_job(jid: str, cfg: dict, pid: str, text: str, lang: str, opts: dict) ->
     args.no_guard = bool(opts.get("no_guard", False))
     args.guard_attempts = int(opts.get("guard_attempts", 2))
     args.gsv_version = opts.get("gsv_version") or None
+    args.prosody = opts.get("prosody") or None
+    args.prosody_strength = float(opts.get("prosody_strength") or 1.0)
+
+    # 情绪：合成的入口是 synth()，它只认 prof["aux_ref_audio_paths"]，
+    # 所以必须在这里把情绪名解析成实际音频路径。
+    # （之前只在 CLI 的 resolve_profile 里做，界面选了情绪等于没生效。）
+    args.emotion = None
+    emo_name = opts.get("emotion")
+    if emo_name:
+        import emotions as _emo
+        got = _emo.resolve(pid, [emo_name] if isinstance(emo_name, str) else list(emo_name))
+        if got:
+            args.emotion = emo_name
+            prof_vo["aux_ref_audio_paths"] = [g["audio"] for g in got]
+            print(f"[情绪] 融合参考: {', '.join(g['name'] for g in got)}", flush=True)
+        else:
+            print(f"[情绪] 未登记或文件缺失，已忽略: {emo_name}", flush=True)
 
     fname = f"{time.strftime('%H%M%S')}_{jid}.wav"
     out = WEB_DIR / fname

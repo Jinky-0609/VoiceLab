@@ -289,6 +289,15 @@ def synth(cfg: dict, prof: dict, text: str, lang: str, out_path: Path, args) -> 
             "\n最常见原因是参考音频语言与目标语言不一致 —— 请改用目标语言的同种语言参考音频。"
         )
 
+    # 参数化情绪：不需要素材，作用在合成结果上，对所有音色一视同仁。
+    # 与"情绪参考"是两条并行的路：素材情绪改变韵律细节，参数情绪改变整体倾向。
+    pros = getattr(args, "prosody", None)
+    if pros:
+        import prosody
+        before = len(audio) / sr
+        audio = prosody.apply(audio, sr, pros, float(getattr(args, "prosody_strength", 1.0) or 1.0))
+        print(f"[韵律] {pros} 参数化情绪 {before:.2f}s -> {len(audio)/sr:.2f}s", flush=True)
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
     sf.write(str(out_path), audio, sr)
     print(f"[合成] {dt:5.2f}s  音频 {dur:5.2f}s  RTF={dt / dur:4.2f}  -> {out_path}", flush=True)
@@ -373,6 +382,12 @@ def main() -> int:
         p.add_argument("--how-to-cut", help="切句方式")
         p.add_argument("--if-sr", action="store_true", help="启用超分辨率（仅 v3）")
         p.add_argument("--seed", type=int, help="随机种子（默认每次随机；坍缩重试时会另取种子）")
+        p.add_argument("--prosody", metavar="预设",
+                       help="参数化情绪（不需要素材）："
+                            + " / ".join(__import__("prosody").available())
+                            + "。对所有音色有效。")
+        p.add_argument("--prosody-strength", type=float, default=1.0,
+                       help="参数化情绪强度 0~1.5（默认 1.0）")
         p.add_argument("--emotion", action="append", default=None, metavar="名称",
                        help="情绪参考名（可重复，如 --emotion 开心 --emotion 激动）。"
                             "用 tools/emotions.py 登记；作为上游 aux 参考参与韵律融合。"

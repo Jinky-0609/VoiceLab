@@ -310,6 +310,18 @@
   .chip:hover{background:rgba(0,122,255,.10);border-color:var(--ios-blue);color:var(--ios-blue)}
   .chip:active{transform:scale(.95)}
 
+  /* 自动情绪分段表 */
+  .emo-plan{display:flex;flex-direction:column;gap:7px;max-height:340px;overflow-y:auto;padding-right:2px}
+  .emo-row{
+    display:flex;align-items:center;gap:9px;padding:9px 11px;
+    background:var(--panel-2);border-radius:9px;font-size:13.5px
+  }
+  .emo-row .idx{font:11.5px/1 var(--mono);color:var(--dim);flex:none;width:20px}
+  .emo-row .tx{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .emo-row .conf{font-size:11.5px;color:var(--dim);flex:none}
+  .emo-row select{width:118px;height:30px;flex:none;font-size:13px;padding:0 8px}
+  .emo-row select.overridden{border-color:var(--ios-blue);background:rgba(0,122,255,.08)}
+
   /* ---------- 训练面板 ---------- */
   .pane{display:none}
   .pane.on{display:block}
@@ -660,6 +672,20 @@
           </div>
           <div class="ref-info" id="emotionInfo"></div>
         </div>
+        <div class="field"><label for="prosody">参数化情绪<span style="color:var(--dim)"> 无需素材，适合所有音色</span></label>
+          <select id="prosody">
+            <option value="">不使用</option>
+            <option value="开心">开心（快、略高）</option>
+            <option value="激动">激动（最快、最高、最响）</option>
+            <option value="生气">生气（快、力度强）</option>
+            <option value="悲伤">悲伤（慢、低、轻）</option>
+            <option value="温柔">温柔（稍慢、稍低）</option>
+            <option value="严肃">严肃（稍慢、明显降低）</option>
+            <option value="耳语">耳语（音量很低）</option>
+            <option value="疲惫">疲惫（很慢、虚弱）</option>
+          </select></div>
+        <div class="field"><label for="prosodyStrength">情绪强度 <span style="color:var(--dim)">0~1.5</span></label>
+          <input type="number" id="prosodyStrength" step="0.1" min="0" max="1.5" value="1"></div>
         <div class="field"><label for="gsvVersion">模型版本</label>
           <select id="gsvVersion">
             <option value="">自动（按音色权重判断）</option>
@@ -715,6 +741,24 @@
   <div class="pane" id="paneBatch" style="display:none">
    <div class="train-grid">
     <section class="card">
+      <div class="sec" style="border-bottom:0;padding-bottom:0">
+        <h3>自动情绪分段 <span class="tag" style="background:rgba(255,149,0,.13);color:#8A5A00">实验性</span></h3>
+        <div class="ref-info" style="margin-bottom:10px">
+          按句切开并自动判情绪。<b>规则判定不完美，下面每一句都可以手动改。</b>
+        </div>
+        <div style="display:flex;gap:9px">
+          <button class="btn sm" id="autoEmoBtn">从上方文本自动分段</button>
+          <button class="btn sm ghost" id="emoPlanClear" style="display:none">清除方案</button>
+        </div>
+        <div id="emoPlanWrap" style="display:none;margin-top:12px">
+          <div class="emo-plan" id="emoPlan"></div>
+          <div class="i-act" style="margin-top:10px">
+            <button class="btn sm primary" id="emoRenderBtn">按此方案生成并拼接</button>
+            <span class="dur" id="emoPlanSum"></span>
+          </div>
+        </div>
+      </div>
+
       <div class="sec">
         <h3>批量合成</h3>
         <div class="field" style="margin-bottom:12px">
@@ -1120,7 +1164,8 @@ function syncText(){
 }
 function saveDraft(){
   const keys=["speed","sample_steps","top_k","top_p","temperature","how_to_cut","seed",
-              "guard_attempts","ref_audio","ref_text","gsvVersion"];
+              "guard_attempts","ref_audio","ref_text","gsvVersion",
+              "prosody","prosodyStrength"];
   const o={profile:$("#profile").value, lang:$("#lang").value, ref_lang:$("#ref_lang").value,
            text:$("#text").value, no_guard:$("#no_guard").checked};
   keys.forEach(k=>{ if($("#"+k)) o[k]=$("#"+k).value; });
@@ -1142,6 +1187,11 @@ function buildOpts(){
   if($("#gsvVersion").value) o.gsv_version=$("#gsvVersion").value;
   const emo = document.getElementById("emotionSel");
   if(emo && emo.value) o.emotion=emo.value;
+  const pr = document.getElementById("prosody");
+  if(pr && pr.value){
+    o.prosody = pr.value;
+    o.prosody_strength = parseFloat(document.getElementById("prosodyStrength").value) || 1.0;
+  }
   return o;
 }
 
@@ -1778,6 +1828,143 @@ $("#warmBtn").addEventListener("click", async ()=>{
     show: ()=>{ syncCount(); },
     hide: ()=>{}
   };
+})();
+
+/* ---------------- 自动情绪分段 ---------------- */
+(function(){
+  let plan = [];        // 当前方案
+  let avail = [];       // 该音色已登记的情绪
+  const wrap = document.getElementById("emoPlanWrap");
+  const box  = document.getElementById("emoPlan");
+
+  function render(){
+    box.innerHTML = "";
+    plan.forEach((s, i)=>{
+      const row = document.createElement("div");
+      row.className = "emo-row";
+      const idx = document.createElement("span");
+      idx.className = "idx"; idx.textContent = s.i;
+
+      const tx = document.createElement("span");
+      tx.className = "tx"; tx.textContent = s.text; tx.title = s.text;
+
+      const conf = document.createElement("span");
+      conf.className = "conf";
+      if(s.hits && s.hits.length) conf.textContent = s.confidence.toFixed(2);
+      else conf.textContent = "";
+
+      const sel = document.createElement("select");
+      const optNone = document.createElement("option");
+      optNone.value = ""; optNone.textContent = "（无情绪）";
+      sel.appendChild(optNone);
+      avail.forEach(a=>{
+        const o = document.createElement("option");
+        o.value = a; o.textContent = a;
+        if(a === s.emotion) o.selected = true;
+        sel.appendChild(o);
+      });
+      // 自动判出但未登记的情绪，作为提示项（禁用）
+      if(s.suggest && s.emotion !== s.suggest){
+        const o = document.createElement("option");
+        o.value = "__suggest__";
+        o.textContent = `建议：${s.suggest}（未登记）`;
+        o.disabled = true;
+        sel.appendChild(o);
+      }
+      if(!s.emotion && s.suggest && !avail.includes(s.suggest)){
+        sel.value = "";
+      }
+      sel.onchange = ()=>{
+        s.emotion = sel.value === "__suggest__" ? "" : sel.value;
+        sel.classList.toggle("overridden", !!s.emotion);
+        updateSum();
+      };
+      sel.classList.toggle("overridden", !!s.emotion);
+
+      row.appendChild(idx); row.appendChild(tx); row.appendChild(conf); row.appendChild(sel);
+      box.appendChild(row);
+    });
+    wrap.style.display = plan.length ? "block" : "none";
+    document.getElementById("emoPlanClear").style.display = plan.length ? "inline-flex" : "none";
+    updateSum();
+  }
+
+  function updateSum(){
+    const withEmo = plan.filter(s=>s.emotion).length;
+    const chars = plan.reduce((a,s)=>a+s.text.length, 0);
+    const est = (chars * 0.19).toFixed(1);
+    document.getElementById("emoPlanSum").textContent =
+      `${plan.length} 段 · ${withEmo} 段带情绪 · 估时 ${est}s`;
+  }
+
+  document.getElementById("autoEmoBtn").onclick = async ()=>{
+    const text = document.getElementById("text").value.trim();
+    if(!text){ toast("先在上面输入文本", "err"); return; }
+    const profile = document.getElementById("profile").value;
+    try{
+      const d = await fetch("/api/auto_emotion", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({text, profile, max_chars: 60})
+      }).then(r=>r.json());
+      plan = d.segments || [];
+      avail = d.available || [];
+      if(!plan.length){ toast("没有分出声", "err"); return; }
+      render();
+      if(!avail.length){
+        toast("这个音色还没登记情绪，全部会是默认音色。先在「高级」里添加情绪。", "err", 6000);
+      }
+    }catch(e){ toast("分段失败：" + e.message, "err"); }
+  };
+
+  document.getElementById("emoPlanClear").onclick = ()=>{
+    plan = []; render();
+  };
+
+  document.getElementById("emoRenderBtn").onclick = async ()=>{
+    if(!plan.length) return;
+    const btn = document.getElementById("emoRenderBtn");
+    btn.disabled = true; btn.textContent = "生成中…";
+    try{
+      const r = await fetch("/api/emotion_render", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          profile: document.getElementById("profile").value,
+          segments: plan.map(s=>({text:s.text, emotion:s.emotion,
+                                  lang: document.getElementById("lang").value})),
+          opts: buildOpts()
+        })
+      });
+      const d = await r.json();
+      if(!r.ok) throw new Error(d.detail || "提交失败");
+      pollRender(d.job, btn);
+    }catch(e){
+      toast("失败：" + e.message, "err", 5000);
+      btn.disabled = false; btn.textContent = "按此方案生成并拼接";
+    }
+  };
+
+  async function pollRender(jid, btn){
+    try{
+      const j = await fetch(`/api/batch/${jid}`).then(r=>r.json());
+      const pc = j.total ? Math.round(j.done*100/j.total) : 0;
+      btn.textContent = `生成中 ${j.done}/${j.total}`;
+      if(j.status === "running"){ setTimeout(()=>pollRender(jid, btn), 1200); return; }
+      btn.disabled = false; btn.textContent = "按此方案生成并拼接";
+      if(j.zip){
+        toast(`完成：${j.segments_made||j.done}/${j.total} 段已拼接`, "ok", 5000);
+        const a = document.createElement("audio");
+        a.controls = true; a.src = j.zip; a.style.width = "100%"; a.style.marginTop = "10px";
+        const old = document.getElementById("emoPreview");
+        if(old) old.remove();
+        a.id = "emoPreview";
+        wrap.appendChild(a);
+        a.play().catch(()=>{});
+      }else{
+        toast("生成失败，看下方错误", "err", 5000);
+      }
+      (j.errors||[]).forEach(e=>toast(`第${e.i}段失败：${e.error}`, "err", 4000));
+    }catch(e){ setTimeout(()=>pollRender(jid, btn), 2500); }
+  }
 })();
 
 /* ---------------- 资源占用监控 ---------------- */
