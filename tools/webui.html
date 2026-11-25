@@ -664,15 +664,23 @@
         <div class="field"><label for="ref_lang">参考音频语言</label>
           <select id="ref_lang"></select></div>
         <div class="field" style="grid-column:1/-1">
-          <label>情绪参考<span style="color:var(--dim)"> · v3/v4 无 emotion 参数，情绪由参考音频承载</span></label>
+          <label>情绪参考
+            <span class="tag" style="background:rgba(255,149,0,.13);color:#8A5A00">实验性</span>
+            <span style="color:var(--dim)"> · 默认关闭，会产生机械音</span></label>
           <div class="ref-drop">
             <select id="emotionSel" style="flex:1"></select>
             <button class="btn sm" id="emotionAdd" type="button">＋ 添加</button>
             <button class="btn sm ghost danger" id="emotionDel" type="button" title="删除选中">✕</button>
           </div>
+          <label class="check" style="margin-top:7px;font-size:13px">
+            <input type="checkbox" id="auxEmotionEnable">
+            启用情绪参考（实验性，可能有机械音 / 叠层感）
+          </label>
           <div class="ref-info" id="emotionInfo"></div>
         </div>
-        <div class="field"><label for="prosody">参数化情绪<span style="color:var(--dim)"> 无需素材，适合所有音色</span></label>
+        <div class="field"><label for="prosody">
+          参数化情绪 <span class="tag hi">推荐</span>
+          <span style="color:var(--dim)"> 无需素材 · 不改音高 · 无副作用</span></label>
           <select id="prosody">
             <option value="">不使用</option>
             <option value="开心">开心（快、略高）</option>
@@ -686,6 +694,10 @@
           </select></div>
         <div class="field"><label for="prosodyStrength">情绪强度 <span style="color:var(--dim)">0~1.5</span></label>
           <input type="number" id="prosodyStrength" step="0.1" min="0" max="1.5" value="1"></div>
+        <div class="ref-info" style="grid-column:1/-1;margin-top:-4px">
+          参数化情绪改的是<b>语速、力度、停顿节奏</b>，不碰音高——所以不会把声音变尖。
+          情绪参考（上面那个）会改变韵律细节，但在 v3 上不稳定，默认关闭。
+        </div>
         <div class="field"><label for="gsvVersion">模型版本</label>
           <select id="gsvVersion">
             <option value="">自动（按音色权重判断）</option>
@@ -1186,7 +1198,11 @@ function buildOpts(){
   if($("#no_guard").checked) o.no_guard=true;
   if($("#gsvVersion").value) o.gsv_version=$("#gsvVersion").value;
   const emo = document.getElementById("emotionSel");
-  if(emo && emo.value) o.emotion=emo.value;
+  const auxOn = document.getElementById("auxEmotionEnable");
+  if(emo && emo.value && auxOn && auxOn.checked){
+    o.emotion = emo.value;
+    o.aux_emotion = true;
+  }
   const pr = document.getElementById("prosody");
   if(pr && pr.value){
     o.prosody = pr.value;

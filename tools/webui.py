@@ -841,8 +841,17 @@ def _run_job(jid: str, cfg: dict, pid: str, text: str, lang: str, opts: dict) ->
     # 情绪：合成的入口是 synth()，它只认 prof["aux_ref_audio_paths"]，
     # 所以必须在这里把情绪名解析成实际音频路径。
     # （之前只在 CLI 的 resolve_profile 里做，界面选了情绪等于没生效。）
+    # 情绪参考（aux）在 v3 上属于**实验性**能力：
+    # 实测会带来机械音/轻微叠层感，且上游 raw_audio 污染问题只能部分规避。
+    # 因此默认不使用，必须显式传 aux_emotion:true 才启用。
+    # 常规情绪表达请用 prosody（参数化，纯后处理，无副作用）。
     args.emotion = None
     emo_name = opts.get("emotion")
+    enable_aux_emo = bool(opts.get("aux_emotion", False))
+    if emo_name and not enable_aux_emo:
+        print(f"[情绪] 已忽略「{emo_name}」：情绪参考在 v3 上仍是实验特性，"
+              f"默认关闭（会有机械音）。建议改用参数化情绪（prosody）。", flush=True)
+        emo_name = None
     if emo_name:
         import emotions as _emo
         got = _emo.resolve(pid, [emo_name] if isinstance(emo_name, str) else list(emo_name))
