@@ -301,6 +301,15 @@
   .ref-info.warn{color:var(--ios-orange)}
   .ref-info.err{color:var(--ios-red)}
 
+  .chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:2px}
+  .chip{
+    padding:5px 12px;border-radius:14px;border:.5px solid var(--line-2);
+    background:var(--panel-2);font-size:13px;cursor:pointer;
+    transition:all .16s;color:var(--fg)
+  }
+  .chip:hover{background:rgba(0,122,255,.10);border-color:var(--ios-blue);color:var(--ios-blue)}
+  .chip:active{transform:scale(.95)}
+
   /* ---------- 训练面板 ---------- */
   .pane{display:none}
   .pane.on{display:block}
@@ -558,9 +567,15 @@
   <div class="brand"><div class="logo">V</div><span>VoiceLab</span></div>
   <div class="tabs">
     <button class="tab on" id="tabSynth">合成</button>
+    <button class="tab" id="tabBatch">批量</button>
     <button class="tab" id="tabTrain">训练</button>
+    <button class="tab" id="tabVoices">音色</button>
   </div>
   <div class="spacer"></div>
+  <div class="pill" id="resPill" title="资源占用（紧张时合成会变慢）"
+       style="margin-right:8px;display:none">
+    <span id="resText"></span>
+  </div>
   <div class="pill" id="enginePill" title="引擎常驻后可连续快速合成">
     <span class="dot"></span><span id="engineText">未加载</span>
   </div>
@@ -636,6 +651,15 @@
           <input type="text" id="ref_text" placeholder="音频里说的每个字"></div>
         <div class="field"><label for="ref_lang">参考音频语言</label>
           <select id="ref_lang"></select></div>
+        <div class="field" style="grid-column:1/-1">
+          <label>情绪参考<span style="color:var(--dim)"> · v3/v4 无 emotion 参数，情绪由参考音频承载</span></label>
+          <div class="ref-drop">
+            <select id="emotionSel" style="flex:1"></select>
+            <button class="btn sm" id="emotionAdd" type="button">＋ 添加</button>
+            <button class="btn sm ghost danger" id="emotionDel" type="button" title="删除选中">✕</button>
+          </div>
+          <div class="ref-info" id="emotionInfo"></div>
+        </div>
         <div class="field"><label for="gsvVersion">模型版本</label>
           <select id="gsvVersion">
             <option value="">自动（按音色权重判断）</option>
@@ -654,6 +678,7 @@
       <span class="count" id="count">0 字</span>
       <button class="btn ghost sm" id="clearBtn" title="清空文本">清空</button>
       <div class="spacer"></div>
+      <button class="btn ghost sm" id="splitBtn" title="长文本切成多段并排队批量合成">分段</button>
       <button class="btn" id="warmBtn" title="先把模型读进显存，避免第一句等 25~60 秒">预热引擎</button>
       <button class="btn primary" id="goBtn">
         <span id="goIcon"></span><span id="goText">合成</span>
@@ -666,12 +691,68 @@
     <div class="hist-head">
       <h2>历史</h2><span class="n" id="histN">0</span>
       <div class="spacer"></div>
+      <button class="btn ghost sm" id="cmpBtn" style="display:none" title="同时对比选中的两条">对比</button>
       <button class="btn ghost sm" id="pauseAll" style="display:none" title="停止当前播放">■ 停止</button>
     </div>
     <div class="hist-list" id="list"></div>
   </aside>
 
   </div><!-- /paneSynth -->
+
+  <!-- ================= 音色管理 ================= -->
+  <div class="pane" id="paneVoices" style="display:none">
+    <section class="card">
+      <div class="hist-head">
+        <h2>音色管理</h2><span class="n" id="voicesN">0</span>
+        <div class="spacer"></div>
+        <button class="btn sm ghost" id="voicesRefresh">刷新</button>
+      </div>
+      <div class="sp-list" id="voicesList" style="padding:12px"></div>
+    </section>
+  </div>
+
+  <!-- ================= 批量合成 ================= -->
+  <div class="pane" id="paneBatch" style="display:none">
+   <div class="train-grid">
+    <section class="card">
+      <div class="sec">
+        <h3>批量合成</h3>
+        <div class="field" style="margin-bottom:12px">
+          <label>每行一句（也可粘贴 JSONL：{"text":"...","lang":"中文","out":"001.wav"}）</label>
+          <textarea id="batchText" style="min-height:220px;background:var(--panel-2);
+                    border-radius:10px;border:.5px solid transparent"
+                    placeholder="第一句台词&#10;第二句台词&#10;第三句台词"></textarea>
+        </div>
+        <div class="ref-info" id="batchInfo"></div>
+      </div>
+      <div class="bar">
+        <span class="count" id="batchCount">0 行</span>
+        <div class="spacer"></div>
+        <button class="btn" id="batchClear">清空</button>
+        <button class="btn primary" id="batchGo">开始批量</button>
+      </div>
+    </section>
+
+    <aside class="card" style="display:flex;flex-direction:column">
+      <div class="hist-head">
+        <h2>进度</h2>
+        <span class="n" id="batchN">—</span>
+        <div class="spacer"></div>
+        <span class="pill" id="batchPill" style="height:24px;font-size:11.5px">
+          <span class="dot"></span><span id="batchPillText">空闲</span>
+        </span>
+      </div>
+      <div class="prog" id="batchProg" style="display:none;margin:10px 10px 0">
+        <i style="width:0%;background:var(--ios-blue);animation:none"></i>
+      </div>
+      <div class="log-box" id="batchLog" style="margin:10px;flex:1;height:280px">等待开始…</div>
+      <div style="padding:0 10px 10px;display:flex;gap:8px">
+        <a class="btn sm ghost" id="batchDl" style="display:none;flex:1;text-decoration:none">下载 zip</a>
+        <button class="btn sm ghost" id="batchStop" style="display:none">停止</button>
+      </div>
+    </aside>
+   </div>
+  </div>
 
   <!-- ================= 训练 ================= -->
   <div class="pane" id="paneTrain" style="display:none">
@@ -764,6 +845,9 @@
           <span class="dot"></span><span id="trainPillText">空闲</span>
         </span>
       </div>
+      <div class="prog" id="trainProg" style="display:none;margin:0 10px 8px">
+        <i style="width:0%;background:var(--ios-blue);animation:none"></i>
+      </div>
       <div class="log-box" id="log" style="margin:10px;flex:1">等待开始…</div>
       <div style="padding:0 10px 10px">
         <button class="btn sm ghost" id="btnClearLog" style="width:100%">清空日志</button>
@@ -784,6 +868,41 @@
 </main>
 
 <div id="toasts"></div>
+
+<div class="sheet-mask" id="emoMask">
+  <div class="sheet" role="dialog" aria-modal="true" style="max-width:440px">
+    <div class="sheet-body" style="text-align:left">
+      <div class="sheet-title" style="text-align:center">添加情绪参考</div>
+      <div class="sheet-text" style="text-align:center;margin-bottom:14px">
+        用同一人的带情绪片段驱动韵律。名字随你定。
+      </div>
+      <div class="field" style="margin-bottom:11px">
+        <label for="emoName">情绪名称</label>
+        <input type="text" id="emoName" placeholder="开心 / 生气 / 你自己的叫法">
+      </div>
+      <div id="emoChips" class="chips"></div>
+      <div class="field" style="margin:11px 0">
+        <label>参考音频</label>
+        <div class="ref-drop">
+          <div class="filechip" style="flex:1;margin:0">
+            <span class="grow" id="emoFileLabel">选择音频（3~10 秒、同一人、干声）</span>
+          </div>
+          <button class="btn sm" type="button"
+                  onclick="document.getElementById('emoFile').click()">选择</button>
+        </div>
+        <input type="file" id="emoFile" accept="audio/*,.m4a,.aac" hidden>
+      </div>
+      <div class="field">
+        <label for="emoText">这段音频的逐字文本（可选，填了更稳）</label>
+        <input type="text" id="emoText" placeholder="音频里说的每一个字">
+      </div>
+    </div>
+    <div class="sheet-actions">
+      <button id="emoCancel" class="cancel">取消</button>
+      <button id="emoOk">添加</button>
+    </div>
+  </div>
+</div>
 
 <div class="sheet-mask" id="sheetMask">
   <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
@@ -810,7 +929,7 @@
 <script>
 "use strict";
 const $ = s => document.querySelector(s);
-const state = { cfg:null, jobs:{}, playing:null, advOpen:false };
+const state = { cfg:null, jobs:{}, playing:null, advOpen:false, picks:[] };
 const DRAFT = "voicelab.draft.v1";
 const MAXLEN = 2000;
 
@@ -1021,6 +1140,8 @@ function buildOpts(){
   if($("#ref_lang").value) o.ref_lang=$("#ref_lang").value;
   if($("#no_guard").checked) o.no_guard=true;
   if($("#gsvVersion").value) o.gsv_version=$("#gsvVersion").value;
+  const emo = document.getElementById("emotionSel");
+  if(emo && emo.value) o.emotion=emo.value;
   return o;
 }
 
@@ -1085,7 +1206,11 @@ function itemNode(j){
   el.className="item "+(st==="running"?"running":(st==="collapsed"||st==="error"?"collapsed":""));
   const label = st==="queued" ? `排队第 ${j.position||"?"}` : st==="running" ? "合成中"
               : st==="collapsed" ? "已被守卫拦下" : st==="error" ? "失败" : "";
+  const picked = state.picks && state.picks.includes(j.job);
   let inner = `<div class="i-top">
+      ${st==="done" ? `<input type="checkbox" class="pick" data-pick="${j.job}"
+           ${picked?"checked":""} title="勾选两条可对比试听"
+           style="width:16px;height:16px;margin-right:2px">` : ""}
       <span class="tag ${st==="done"?"hi":""}">${esc(j.profile||"")}</span>
       <span class="tag">${esc(j.lang||"")}</span>
       ${label?`<span class="tag" style="background:rgba(255,180,84,.12);color:#f5c880">${label}</span>`:""}
@@ -1143,6 +1268,50 @@ setInterval(()=>{
     el.textContent=`${((now-j.t0)/1000).toFixed(1)}s`;
   });
 }, 200);
+
+/* ---------------- A/B 对比 ---------------- */
+function syncCompare(){
+  const btn = $("#cmpBtn");
+  if(!btn) return;
+  const n = (state.picks||[]).length;
+  btn.style.display = n ? "inline-flex" : "none";
+  btn.textContent = n === 2 ? "对比播放" : `对比(${n}/2)`;
+  btn.disabled = n !== 2;
+}
+
+function comparePlay(){
+  if(!state.picks || state.picks.length !== 2) return;
+  const [a, b] = state.picks;
+  const ea = document.querySelector(`audio[data-audio="${a}"]`);
+  const eb = document.querySelector(`audio[data-audio="${b}"]`);
+  if(!ea || !eb){ toast("这两条里有的音频已不存在","err"); return; }
+  bindAudios();
+  // 都从头开始，同时播
+  ea.currentTime = 0; eb.currentTime = 0;
+  ea.play().catch(()=>{});
+  eb.play().catch(()=>{});
+  toast("正在同时播放两条，可直接听差异","ok",3000);
+}
+
+document.addEventListener("change", e=>{
+  const cb = e.target.closest("[data-pick]");
+  if(!cb) return;
+  const id = cb.dataset.pick;
+  state.picks = state.picks.filter(x=>x!==id);
+  if(cb.checked){
+    state.picks.push(id);
+    if(state.picks.length > 2) state.picks.shift();   // 只保留最近两条
+  }
+  // 同步其它勾选框状态
+  document.querySelectorAll("[data-pick]").forEach(x=>{
+    x.checked = state.picks.includes(x.dataset.pick);
+  });
+  syncCompare();
+});
+
+document.addEventListener("click", e=>{
+  if(e.target.closest("#cmpBtn")){ comparePlay(); }
+});
 
 /* ---------------- 播放 ---------------- */
 /* 关键：列表每次重渲染都会重建 DOM，事件必须重新绑定，且渲染只在状态变化时做，
@@ -1256,6 +1425,391 @@ $("#warmBtn").addEventListener("click", async ()=>{
   },1500);
 });
 
+/* ---------------- 音色管理 ---------------- */
+(function(){
+  const list = document.getElementById("voicesList");
+  const nEl = document.getElementById("voicesN");
+  if(!list) return;
+
+  async function load(){
+    try{
+      const d = await fetch("/api/voices").then(r=>r.json());
+      nEl.textContent = d.voices.length;
+      list.innerHTML = "";
+      d.voices.forEach(v=>{
+        const el = document.createElement("div");
+        el.className = "sp-item";
+        el.innerHTML = `
+          <div class="row1">
+            <span class="nm">${esc(v.name)}</span>
+            <span class="tag ${v.ok?'hi':''}">${v.ok?'可用':'不可用'}</span>
+            <span class="tag">${esc(v.version)}</span>
+            <span class="tag">${v.size_mb}MB</span>
+            ${v.needs_ref?'<span class="tag" style="color:var(--ios-orange)">需参考音频</span>':''}
+          </div>
+          <div class="field" style="margin-top:9px">
+            <label>描述</label>
+            <input type="text" data-v="${esc(v.name)}" data-f="desc" value="${esc(v.desc)}">
+          </div>
+          <div class="field" style="margin-top:7px">
+            <label>参考音频（项目相对路径）</label>
+            <input type="text" data-v="${esc(v.name)}" data-f="ref_audio" value="${esc(v.ref_audio||'')}"
+                   placeholder="data/refs/xxx.wav">
+          </div>
+          <div class="adv-grid" style="margin-top:7px">
+            <div class="field">
+              <label>参考文本</label>
+              <input type="text" data-v="${esc(v.name)}" data-f="ref_text" value="${esc(v.ref_text||'')}">
+            </div>
+            <div class="field">
+              <label>参考语言</label>
+              <select data-v="${esc(v.name)}" data-f="ref_lang">
+                ${(state.cfg&&state.cfg.languages||['中文']).map(l=>
+                  `<option ${l===v.ref_lang?'selected':''}>${esc(l)}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <div class="i-act" style="margin-top:9px">
+            <button class="btn sm primary" data-save="${esc(v.name)}">保存</button>
+            <button class="btn sm ghost danger" data-delvoice2="${esc(v.name)}">删除音色</button>
+            ${v.reason?`<span class="dur" style="color:var(--ios-red)">${esc(v.reason)}</span>`:''}
+          </div>`;
+        list.appendChild(el);
+      });
+    }catch(e){
+      list.innerHTML = '<div class="empty-sm">读取失败：' + esc(e.message) + '</div>';
+    }
+  }
+
+  document.getElementById("voicesRefresh").onclick = load;
+
+  list.addEventListener("click", async e=>{
+    const save = e.target.closest("[data-save]");
+    if(save){
+      const name = save.dataset.save;
+      const body = {};
+      list.querySelectorAll(`[data-v="${CSS.escape(name)}"]`).forEach(inp=>{
+        body[inp.dataset.f] = inp.value;
+      });
+      save.disabled = true;
+      try{
+        const r = await fetch(`/api/voices/${encodeURIComponent(name)}`, {
+          method:"PATCH", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify(body)
+        });
+        const d = await r.json();
+        if(!r.ok) throw new Error(d.detail || "保存失败");
+        toast(`已保存「${name}」`, "ok");
+        state.cfg = await api("/api/config");
+        renderConfig(state.cfg);
+      }catch(err){ toast("保存失败：" + err.message, "err", 5000); }
+      finally{ save.disabled = false; }
+    }
+    const del = e.target.closest("[data-delvoice2]");
+    if(del){
+      // 复用删除流程（会弹预览确认）
+      document.dispatchEvent(new CustomEvent("vl:delvoice",
+        {detail: del.dataset.delvoice2}));
+    }
+  });
+
+  window.__voicesPane = { show: load };
+  if(document.getElementById("tabVoices")){
+    document.getElementById("tabVoices").addEventListener("click", load);
+  }
+})();
+
+/* ---------------- 长文本分段 ---------------- */
+(function(){
+  const btn = document.getElementById("splitBtn");
+  if(!btn) return;
+  btn.onclick = async ()=>{
+    const text = document.getElementById("text").value.trim();
+    if(!text){ toast("先输入长文本","err"); return; }
+    try{
+      const d = await fetch("/api/split", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({text, max_chars: 120})
+      }).then(r=>r.json());
+      if(!d.segments || !d.segments.length){ toast("分段失败","err"); return; }
+      // 把分段结果塞进批量页
+      document.getElementById("batchText").value =
+        d.segments.map(s=>s.text).join("\n");
+      document.getElementById("tabBatch").click();
+      toast(`已切成 ${d.segments.length} 段（估时 ${d.estimated_duration}s），确认后点开始`, "ok", 5000);
+    }catch(e){ toast("分段失败：" + e.message, "err"); }
+  };
+})();
+
+/* ---------------- 情绪参考 ---------------- */
+(function(){
+  const sel = document.getElementById("emotionSel");
+  const addBtn = document.getElementById("emotionAdd");
+  const info = document.getElementById("emotionInfo");
+  if(!sel) return;
+
+  function say(msg, cls){
+    info.textContent = msg || "";
+    info.className = "ref-info" + (cls ? " " + cls : "");
+  }
+
+  async function refresh(){
+    const p = document.getElementById("profile").value;
+    if(!p) return;
+    try{
+      const d = await fetch(`/api/emotions/${encodeURIComponent(p)}`).then(r=>r.json());
+      sel.innerHTML = '<option value="">（不使用情绪）</option>';
+      d.emotions.forEach(e=>{
+        const o = document.createElement("option");
+        o.value = e.name;
+        o.textContent = e.name + (e.duration ? ` · ${e.duration}s` : "");
+        if(!e.exists) o.disabled = true;
+        sel.appendChild(o);
+      });
+      if(!d.emotions.length){
+        say("这个音色还没有情绪参考。可添加同一人的带情绪片段（3~10s）。", "");
+      } else {
+        say(`已登记 ${d.emotions.length} 个情绪，选中后与主参考一起参与韵律融合。`, "");
+      }
+    }catch(e){ say("读取失败：" + e.message, "err"); }
+  }
+
+  const COMMON = ["开心", "生气", "悲伤", "温柔", "激动", "平静", "严肃", "耳语"];
+
+  addBtn.onclick = ()=>{
+    openEmotionDialog();
+  };
+
+  // 用 iOS 风格弹层做命名表单（比 prompt 好：可点选常用名、可留空自动生成）
+  function openEmotionDialog(){
+    const mask = document.getElementById("emoMask");
+    const nameInp = document.getElementById("emoName");
+    const chips = document.getElementById("emoChips");
+    const fileInp = document.getElementById("emoFile");
+    const fileLbl = document.getElementById("emoFileLabel");
+    const txtInp = document.getElementById("emoText");
+
+    chips.innerHTML = "";
+    COMMON.forEach(c=>{
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "chip";
+      b.textContent = c;
+      b.onclick = ()=>{ nameInp.value = c; };
+      chips.appendChild(b);
+    });
+    nameInp.value = "";
+    fileInp.value = "";
+    fileLbl.textContent = "选择音频（3~10 秒、同一人、干声）";
+    txtInp.value = "";
+    mask.classList.add("on");
+    setTimeout(()=>nameInp.focus(), 80);
+
+    fileInp.onchange = ()=>{
+      if(fileInp.files.length){
+        const f = fileInp.files[0];
+        fileLbl.textContent = f.name + ` (${(f.size/1024).toFixed(0)} KB)`;
+        if(!nameInp.value.trim()){
+          nameInp.value = f.name.replace(/\.[^.]+$/, "").slice(0, 20);
+        }
+      }
+    };
+
+    const close = ()=>{ mask.classList.remove("on"); };
+    document.getElementById("emoCancel").onclick = close;
+    document.getElementById("emoOk").onclick = async ()=>{
+      const name = nameInp.value.trim();
+      if(!name){ toast("请填情绪名称", "err"); nameInp.focus(); return; }
+      if(!fileInp.files.length){ toast("请选择音频文件", "err"); return; }
+      const fd = new FormData();
+      fd.append("name", name);
+      fd.append("file", fileInp.files[0]);
+      fd.append("text", txtInp.value.trim());
+      fd.append("lang", document.getElementById("ref_lang").value || "中文");
+      say("上传中…");
+      close();
+      try{
+        const r = await fetch(`/api/emotions/${encodeURIComponent(document.getElementById("profile").value)}`,
+                              {method:"POST", body:fd});
+        const d = await r.json();
+        if(!r.ok) throw new Error(d.detail || "失败");
+        say(`已添加「${d.name}」${d.duration ? ' · ' + d.duration + 's' : ''}`
+            + (d.warning ? ' —— ' + d.warning : ''), d.warning ? "warn" : "ok");
+        refresh();
+        sel.value = d.name;
+      }catch(e){ say("失败：" + e.message, "err"); }
+    };
+  }
+
+  // 删除当前选中的情绪
+  document.getElementById("emotionDel").onclick = async ()=>{
+    const p = document.getElementById("profile").value;
+    const name = sel.value;
+    if(!name){ toast("先从下拉里选中要删除的情绪", "err"); return; }
+    if(!confirm(`删除「${p} / ${name}」这条情绪参考？`)) return;
+    try{
+      const r = await fetch(`/api/emotions/${encodeURIComponent(p)}/${encodeURIComponent(name)}`,
+                            {method:"DELETE"});
+      if(!r.ok) throw new Error((await r.json()).detail || "失败");
+      say(`已删除「${name}」`, "ok");
+      refresh();
+    }catch(e){ say("删除失败：" + e.message, "err"); }
+  };
+
+  document.getElementById("profile").addEventListener("change", refresh);
+  window.__refreshEmotions = refresh;
+  refresh();
+})();
+
+/* ---------------- 批量合成 ---------------- */
+(function(){
+  const T = { job:null, timer:null };
+  const $b = id => document.getElementById(id);
+
+  function parseLines(raw){
+    const out = [];
+    for(const ln of raw.split("\n")){
+      const t = ln.trim();
+      if(!t) continue;
+      if(t.startsWith("{")){
+        try{
+          const o = JSON.parse(t);
+          if(o.text) out.push({text:o.text, lang:o.lang, out:o.out});
+          continue;
+        }catch(e){}
+      }
+      out.push({text:t});
+    }
+    return out;
+  }
+
+  function syncCount(){
+    const n = parseLines($b("batchText").value).length;
+    $b("batchCount").textContent = n + " 行";
+    $b("batchGo").disabled = n === 0;
+    $b("batchInfo").textContent = n ? `共 ${n} 条，使用当前音色与目标语言` : "";
+  }
+  $b("batchText").addEventListener("input", syncCount);
+  $b("batchClear").onclick = ()=>{ $b("batchText").value=""; syncCount(); };
+
+  function pushLog(msg){
+    const box = $b("batchLog");
+    if(box.dataset.started !== "1"){ box.textContent=""; box.dataset.started="1"; }
+    const d = document.createElement("div");
+    d.textContent = msg;
+    box.appendChild(d);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  $b("batchGo").onclick = async ()=>{
+    const lines = parseLines($b("batchText").value);
+    if(!lines.length) return;
+    $b("batchLog").dataset.started = "0";
+    $b("batchLog").textContent = "";
+    $b("batchGo").disabled = true;
+    $b("batchGo").textContent = "提交中";
+    try{
+      const r = await fetch("/api/batch", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          profile: document.getElementById("profile").value,
+          lang: document.getElementById("lang").value,
+          lines,
+          opts: buildOpts()
+        })
+      });
+      const d = await r.json();
+      if(!r.ok) throw new Error(d.detail || "提交失败");
+      T.job = d.job;
+      $b("batchDl").style.display = "none";
+      $b("batchStop").style.display = "inline-flex";
+      pushLog(`开始处理 ${d.total} 条…`);
+      poll();
+    }catch(e){
+      pushLog("失败：" + e.message);
+      $b("batchGo").disabled = false;
+    }finally{
+      $b("batchGo").textContent = "开始批量";
+    }
+  };
+
+  $b("batchStop").onclick = async ()=>{
+    if(!T.job) return;
+    await fetch(`/api/batch/${T.job}/cancel`, {method:"POST"});
+    pushLog("已请求停止");
+  };
+
+  async function poll(){
+    if(!T.job) return;
+    try{
+      const j = await fetch(`/api/batch/${T.job}`).then(r=>r.json());
+      const pc = j.total ? Math.round(j.done*100/j.total) : 0;
+      $b("batchN").textContent = `${j.done}/${j.total}`;
+      $b("batchProg").style.display = "block";
+      $b("batchProg").querySelector("i").style.width = Math.max(2,pc) + "%";
+      const pill = $b("batchPill"), txt = $b("batchPillText");
+      pill.classList.remove("ready","working","bad");
+      if(j.status === "running"){ pill.classList.add("working"); txt.textContent = pc + "%"; }
+      else if(j.status === "done"){ pill.classList.add("ready"); txt.textContent = "完成"; }
+      else { pill.classList.add("bad"); txt.textContent = "已停止"; }
+
+      if(j.status === "running"){
+        T.timer = setTimeout(poll, 1200);
+      }else{
+        T.job = null;
+        $b("batchStop").style.display = "none";
+        $b("batchGo").disabled = false;
+        const ok = j.total - (j.errors||[]).length;
+        pushLog(`完成：成功 ${ok}/${j.total}，耗时 ${j.elapsed||"?"}s`);
+        (j.errors||[]).forEach(e=>pushLog(`  ✗ 第${e.i}条 ${e.text} — ${e.error}`));
+        if(j.zip){
+          const a = $b("batchDl");
+          a.href = j.zip;
+          a.style.display = "inline-flex";
+        }
+      }
+    }catch(e){
+      T.timer = setTimeout(poll, 2500);
+    }
+  }
+
+  // 并入标签切换
+  window.__batchPane = {
+    show: ()=>{ syncCount(); },
+    hide: ()=>{}
+  };
+})();
+
+/* ---------------- 资源占用监控 ---------------- */
+(function(){
+  let lastWarn = "";
+  async function tick(){
+    try{
+      const r = await fetch("/api/resource").then(x=>x.json());
+      const pill = document.getElementById("resPill");
+      const txt = document.getElementById("resText");
+      const bits = [];
+      if(r.vram) bits.push(`GPU ${r.vram.percent}%`);
+      if(r.ram) bits.push(`内存 ${r.ram.percent}%`);
+      if(bits.length){
+        pill.style.display = "inline-flex";
+        txt.textContent = bits.join(" · ");
+        pill.classList.toggle("bad", !!(r.warning));
+        pill.classList.toggle("working", !!r.warning);
+      }
+      // 只在告警内容变化时弹一次，避免刷屏
+      if(r.warning && r.warning !== lastWarn){
+        lastWarn = r.warning;
+        toast(r.warning, "err", 6000);
+      } else if(!r.warning){
+        lastWarn = "";
+      }
+    }catch(e){}
+  }
+  tick();
+  setInterval(tick, 8000);
+})();
+
 /* ---------------- 参考音频上传（零样本） ---------------- */
 (function(){
   const drop = document.getElementById("refDrop");
@@ -1315,16 +1869,28 @@ $("#warmBtn").addEventListener("click", async ()=>{
 
   // 显式用 style 控制，避免 display:contents 与 .pane 规则打架
   function showPane(which){
+    const isSynth = which === "synth";
+    const isBatch = which === "batch";
     const isTrain = which === "train";
-    $t("paneSynth").style.display = isTrain ? "none" : "contents";
+    const isVoices = which === "voices";
+    $t("paneSynth").style.display = isSynth ? "contents" : "none";
+    $t("paneBatch").style.display = isBatch ? "block" : "none";
     $t("paneTrain").style.display = isTrain ? "block" : "none";
-    document.querySelector("main").classList.toggle("train-mode", isTrain);
-    $t("tabSynth").classList.toggle("on", !isTrain);
+    const pv = $t("paneVoices"); if(pv) pv.style.display = isVoices ? "block" : "none";
+    // 训练/批量都是单栏布局，main 退化成单列
+    document.querySelector("main").classList.toggle("train-mode", !isSynth);
+    $t("tabSynth").classList.toggle("on", isSynth);
+    $t("tabBatch").classList.toggle("on", isBatch);
     $t("tabTrain").classList.toggle("on", isTrain);
+    const tv = $t("tabVoices"); if(tv) tv.classList.toggle("on", isVoices);
     if(isTrain) refreshSpeakers();
+    if(isBatch && window.__batchPane) window.__batchPane.show();
+    if(isVoices && window.__voicesPane) window.__voicesPane.show();
   }
   $t("tabSynth").onclick = () => showPane("synth");
+  $t("tabBatch").onclick = () => showPane("batch");
   $t("tabTrain").onclick = () => showPane("train");
+  const tvBtn = $t("tabVoices"); if(tvBtn) tvBtn.onclick = () => showPane("voices");
 
   // ---- 文件选择 ----
   const drop = $t("drop"), fileInput = $t("file");
@@ -1395,7 +1961,7 @@ $("#warmBtn").addEventListener("click", async ()=>{
   }
   $t("btnClearLog").onclick = () => { $t("log").textContent = "…"; };
 
-  function paintTrainPill(status, step){
+  function paintTrainPill(status, step, prog, eta){
     const p = $t("trainPill"), tx = $t("trainPillText");
     p.classList.remove("ready","working","bad");
     if(status === "running"){ p.classList.add("working"); tx.textContent = step || "运行中"; }
@@ -1403,7 +1969,19 @@ $("#warmBtn").addEventListener("click", async ()=>{
     else if(status === "error"){ p.classList.add("bad"); tx.textContent = "失败"; }
     else if(status === "cancelled"){ p.classList.add("bad"); tx.textContent = "已停止"; }
     else { tx.textContent = "空闲"; }
-    $t("stageN").textContent = status === "running" ? (step || "…") : "—";
+    // 进度：优先显示百分比，并带上迭代信息与剩余时间
+    let label = "—";
+    if(status === "running"){
+      const pc = Math.round((prog || 0) * 100);
+      label = (step || "…") + (pc ? ` ${pc}%` : "");
+      if(eta) label += ` · 剩 ${eta}`;
+    }
+    $t("stageN").textContent = label;
+    const bar = $t("trainProg");
+    if(bar){
+      bar.style.display = (status === "running" && prog > 0) ? "block" : "none";
+      bar.querySelector("i").style.width = Math.max(2, Math.round((prog||0)*100)) + "%";
+    }
   }
 
   // ---- 开始 ----
@@ -1462,7 +2040,7 @@ $("#warmBtn").addEventListener("click", async ()=>{
         appendLogs(j.lines);
         T.offset = j.total;
       }
-      paintTrainPill(j.status, j.step);
+      paintTrainPill(j.status, j.step, j.progress, j.eta);
       if(j.status === "running" || j.status === "queued"){
         T.timer = setTimeout(poll, 1200);
       }else{

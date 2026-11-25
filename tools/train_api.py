@@ -51,13 +51,27 @@ class Job:
         self.ended: float | None = None
         self.lines: list[str] = []
         self.step = ""
+        # 进度：从 lightning 的 "50/50 [01:51<00:00]" 解析出来
+        self.progress: float = 0.0
+        self.eta: str = ""
+        self.iter_info: str = ""
         self.proc: subprocess.Popen | None = None
         self.error = ""
+
+    # lightning 进度条形如：49/50 [01:50<00:00,  2.20it/s]
+    _PROG = __import__("re").compile(r"(\d+)/(\d+)\s*\[([0-9:]+)<([0-9:]+)")
 
     def log(self, s: str) -> None:
         for ln in str(s).replace("\r\n", "\n").replace("\r", "\n").split("\n"):
             if ln.strip():
                 self.lines.append(ln.rstrip())
+                m = self._PROG.search(ln)
+                if m:
+                    cur, tot = int(m.group(1)), int(m.group(2))
+                    if tot > 0:
+                        self.progress = cur / tot
+                        self.eta = m.group(4)
+                        self.iter_info = f"{cur}/{tot}"
         if len(self.lines) > 4000:
             self.lines = self.lines[-3000:]
 
@@ -67,6 +81,9 @@ class Job:
             "status": self.status, "step": self.step, "error": self.error,
             "started": self.started, "ended": self.ended,
             "elapsed": round((self.ended or time.time()) - self.started, 1),
+            "progress": round(self.progress, 3),
+            "eta": self.eta,
+            "iter_info": self.iter_info,
             "total": len(self.lines),
             "lines": self.lines[offset:],
             "can_cancel": self.status in ("queued", "running"),

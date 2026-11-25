@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import threading
 import time
 import uuid
@@ -180,6 +181,395 @@ def api_config() -> dict:
         "busy": _state["busy"],
         "queue": list(_state["queue"]),
     }
+
+
+# ------------------------------------------------------------------ 音色管理
+
+@app.get("/api/voices")
+def api_voices() -> dict:
+    """音色管理页用：完整信息（含路径、大小、版本）与文件存在性。"""
+    import voicelab
+    cfg = config_io.load()
+    out = []
+    for name, p in cfg["profiles"].items():
+        if name.startswith("_"):
+            continue
+        st = _profile_status(cfg, name)
+        gpt = runtime_paths.resolve(p.get("gpt") or "")
+        sov = runtime_paths.resolve(p.get("sovits") or "")
+        size = 0
+        for f in (gpt, sov):
+            if f and Path(f).is_file():
+                size += Path(f).stat().st_size
+        out.append({
+            "name": name, "desc": p.get("desc", ""),
+            "ref_lang": p.get("ref_lang", ""),
+            "gpt": p.get("gpt", ""), "sovits": p.get("sovits", ""),
+            "ref_audio": p.get("ref_audio", ""), "ref_text": p.get("ref_text", ""),
+            "version": voicelab._sovits_version(str(sov)) if sov else "?",
+            "size_mb": round(size / 2**20, 1),
+            "ok": st["ok"], "needs_ref": st.get("needs_ref", False),
+            "is_zeroshot": st.get("is_zeroshot", False),
+            "reason": st.get("reason", ""),
+        })
+    return {"voices": out}
+
+
+@app.patch("/api/voices/{name}")
+def api_voice_update(name: str, body: dict) -> dict:
+    """改描述 / 参考音频 / 参考文本 / 参考语言。"""
+    cfg = config_io.load()
+    if name not in cfg["profiles"]:
+        raise HTTPException(404, "没有这个音色")
+    p = cfg["profiles"][name]
+    allowed = ("desc", "ref_audio", "ref_text", "ref_lang")
+    touched = []
+    for k in allowed:
+        if k in body and body[k] is not None:
+            p[k] = str(body[k]).strip()
+            touched.append(k)
+    if not touched:
+        raise HTTPException(400, "没有可更新的字段")
+    config_io.save(cfg)
+    return {"updated": name, "fields": touched}
+
+
+@app.post("/api/voices/{name}/duplicate")
+def api_voice_duplicate(name: str, body: dict) -> dict:
+    """复制一个音色档案（只复制配置，权重共享路径）。"""
+    cfg = config_io.load()
+    if name not in cfg["profiles"]:
+        raise HTTPException(404, "没有这个音色")
+    new = (body.get("as") or "").strip()
+    if not new:
+        raise HTTPException(400, "需要新名称")
+    if new in cfg["profiles"]:
+        raise HTTPException(400, f"{new} 已存在")
+    import emotions
+    prof = dict(cfg["profiles"][name])
+    prof["desc"] = (prof.get("desc", "") + "（副本）").strip()
+    cfg["profiles"][new] = prof
+    config_io.save(cfg)
+    return {"created": new}
+
+
+# ------------------------------------------------------------------ 情绪参考
+
+@app.get("/api/emotions/{profile}")
+def api_emotions(profile: str) -> dict:
+    """列出某音色已登记的情绪参考。"""
+    import emotions
+    data = emotions.load(profile)
+    out = []
+    for name, it in data.items():
+        ap = LAB / it.get("audio", "")
+        out.append({
+            "name": name, "audio": it.get("audio", ""),
+            "text": it.get("text", ""), "lang": it.get("lang", "中文"),
+            "exists": ap.is_file(),
+            "duration": _audio_duration(ap),
+        })
+    return {"profile": profile, "emotions": out}
+
+
+def _audio_duration(p: Path) -> float | None:
+    try:
+        import soundfile as sf
+        return round(sf.info(str(p)).duration, 2) if p.is_file() else None
+    except Exception:
+        return None
+
+
+@app.post("/api/emotions/{profile}")
+async def api_emotion_add(profile: str, name: str = Form(...),
+                          text: str = Form(""), lang: str = Form("中文"),
+                          file: UploadFile = File(...)) -> dict:
+    """上传并登记一条情绪参考（音频 + 逐字文本）。"""
+    import emotions
+    suffix = Path(file.filename or "e.wav").suffix.lower()
+    if suffix not in (".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg"):
+        raise HTTPException(400, f"不支持的格式 {suffix}")
+    dest_dir = LAB / "data" / "emotions" / profile
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    raw = dest_dir / f"_upload{suffix}"
+    size = 0
+    with open(raw, "wb") as f:
+        while True:
+            chunk = await file.read(1 << 20)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > 60 * 2**20:
+                f.close(); raw.unlink(missing_ok=True)
+                raise HTTPException(413, "音频超过 60MB")
+            f.write(chunk)
+
+    dest = dest_dir / f"{name}.wav"
+    if suffix != ".wav":
+        try:
+            import video2audio
+            video2audio.extract_one(raw, dest, sr=24000, mono=True)
+            raw.unlink(missing_ok=True)
+        except Exception as e:
+            raw.unlink(missing_ok=True)
+            raise HTTPException(500, f"转码失败：{e}")
+    elif raw != dest:
+        raw.replace(dest)
+
+    rel = str(dest.relative_to(LAB)).replace("\\", "/")
+    try:
+        emotions.add(profile, name, rel, text, lang)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    d = _audio_duration(dest)
+    warn = ""
+    if d and d < 2.5:
+        warn = f"只有 {d}s，太短会不稳定（建议 3~10s）"
+    elif d and d > 20:
+        warn = f"有 {d:.0f}s，偏长会稀释情绪特征（建议 3~10s）"
+    return {"ok": True, "name": name, "audio": rel, "duration": d, "warning": warn}
+
+
+@app.delete("/api/emotions/{profile}/{name}")
+def api_emotion_del(profile: str, name: str) -> dict:
+    import emotions
+    if not emotions.remove(profile, name):
+        raise HTTPException(404, "没有这个情绪")
+    return {"removed": name}
+
+
+# ------------------------------------------------------------------ 长文本分段
+
+@app.post("/api/split")
+def api_split(body: dict) -> dict:
+    """把长文本切成适合合成的段落，并给出估算时间轴（用于生成 srt）。
+
+    body: {text, max_chars?}
+    """
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "文本为空")
+    max_chars = int(body.get("max_chars") or 120)
+    max_chars = max(20, min(max_chars, 500))
+
+    import re
+    # 按句末标点切，再按长度合并/拆分
+    parts = re.split(r"(?<=[。！？；!?;\n])", text)
+    chunks, buf = [], ""
+    for p in parts:
+        p = p.strip()
+        if not p:
+            continue
+        if len(buf) + len(p) <= max_chars:
+            buf += p
+        else:
+            if buf:
+                chunks.append(buf)
+            while len(p) > max_chars:
+                chunks.append(p[:max_chars])
+                p = p[max_chars:]
+            buf = p
+    if buf:
+        chunks.append(buf)
+
+    # 粗估时长：实测中文约 0.19s/字（0.15~0.30 区间）
+    segs, t = [], 0.0
+    for i, c in enumerate(chunks, 1):
+        dur = round(len(c) * 0.19 + 0.25, 2)
+        segs.append({"i": i, "text": c, "chars": len(c),
+                     "start": round(t, 2), "end": round(t + dur, 2)})
+        t += dur
+    return {"segments": segs, "total_chars": len(text),
+            "estimated_duration": round(t, 1), "max_chars": max_chars}
+
+
+BATCH_JOBS: dict[str, dict] = {}
+
+
+@app.post("/api/batch")
+def api_batch(body: dict) -> dict:
+    """批量合成：一次提交多行文本，后台逐条跑，最后打包 zip。
+
+    body: {profile, lang, lines: [{text, lang?, out?}], opts?}
+    """
+    cfg = config_io.load()
+    pid = body.get("profile", "")
+    lines = body.get("lines") or []
+    if pid not in cfg["profiles"]:
+        raise HTTPException(400, "未知音色")
+    if not lines:
+        raise HTTPException(400, "没有待合成的文本")
+    if len(lines) > 500:
+        raise HTTPException(400, "单次最多 500 条，更多请分批")
+
+    st = _profile_status(cfg, pid)
+    if not st["ok"]:
+        raise HTTPException(400, f"该音色暂不可用：{st['reason']}")
+
+    default_lang = body.get("lang") or "中文"
+    opts = body.get("opts") or {}
+    jid = uuid.uuid4().hex[:8]
+    BATCH_JOBS[jid] = {
+        "id": jid, "status": "running", "done": 0, "total": len(lines),
+        "errors": [], "started": time.time(), "zip": None,
+    }
+
+    def worker():
+        import voicelab
+        import zipfile
+        job = BATCH_JOBS[jid]
+        prof_vo = dict(cfg["profiles"][pid])
+        for k in ("gpt", "sovits", "ref_audio", "ref_text"):
+            if prof_vo.get(k):
+                prof_vo[k] = str(runtime_paths.resolve(prof_vo[k]))
+
+        args = _Args(**{k: opts.get(k) for k in
+                        ("how_to_cut", "top_k", "top_p", "temperature", "speed",
+                         "sample_steps", "seed") if opts.get(k) is not None})
+        args.no_guard = bool(opts.get("no_guard", False))
+        args.guard_attempts = int(opts.get("guard_attempts", 2))
+        args.gsv_version = opts.get("gsv_version") or None
+
+        outdir = WEB_DIR / f"batch_{jid}"
+        outdir.mkdir(parents=True, exist_ok=True)
+        made = []
+        with _lock:
+            for i, item in enumerate(lines, 1):
+                if job["status"] == "cancelled":
+                    break
+                text = (item.get("text") or "").strip()
+                if not text:
+                    job["errors"].append({"i": i, "text": "", "error": "空文本"})
+                    job["done"] = i
+                    continue
+                lang = item.get("lang") or default_lang
+                name = item.get("out") or f"{i:04d}.wav"
+                if not name.lower().endswith(".wav"):
+                    name += ".wav"
+                try:
+                    voicelab.synth(cfg, prof_vo, text, lang, outdir / name, args)
+                    made.append(name)
+                except SystemExit as e:
+                    job["errors"].append({"i": i, "text": text[:40], "error": str(e)[:200]})
+                except semantic_guard.SemanticGenerationError as e:
+                    job["errors"].append({"i": i, "text": text[:40],
+                                          "error": "语义坍缩被拦下"})
+                except Exception as e:
+                    job["errors"].append({"i": i, "text": text[:40],
+                                          "error": f"{type(e).__name__}: {str(e)[:160]}"})
+                job["done"] = i
+
+        # 打包
+        if made:
+            zpath = WEB_DIR / f"batch_{jid}.zip"
+            try:
+                with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as zf:
+                    for n in made:
+                        zf.write(outdir / n, arcname=n)
+                job["zip"] = f"/batchzip/{jid}"
+            except Exception as e:
+                job["errors"].append({"i": 0, "text": "", "error": f"打包失败: {e}"})
+
+        job["status"] = "cancelled" if job["status"] == "cancelled" else "done"
+        job["elapsed"] = round(time.time() - job["started"], 1)
+
+    threading.Thread(target=worker, daemon=True).start()
+    return {"job": jid, "total": len(lines)}
+
+
+@app.get("/api/batch/{jid}")
+def api_batch_status(jid: str) -> dict:
+    j = BATCH_JOBS.get(jid)
+    if not j:
+        raise HTTPException(404, "任务不存在")
+    return {k: v for k, v in j.items() if k != "lines"}
+
+
+@app.post("/api/batch/{jid}/cancel")
+def api_batch_cancel(jid: str) -> dict:
+    j = BATCH_JOBS.get(jid)
+    if not j:
+        raise HTTPException(404)
+    j["status"] = "cancelled"
+    return {"cancelled": True}
+
+
+@app.get("/batchzip/{jid}")
+def batch_zip(jid: str):
+    p = (WEB_DIR / f"batch_{jid}.zip").resolve()
+    if not str(p).startswith(str(WEB_DIR.resolve())) or not p.is_file():
+        raise HTTPException(404, "打包文件不存在")
+    return FileResponse(str(p), media_type="application/zip",
+                        filename=f"voicelab_batch_{jid}.zip")
+
+
+@app.get("/api/resource")
+def api_resource() -> dict:
+    """实时资源占用。
+
+    合成慢常常不是 bug 而是资源竞争（实测：显存被占 4.6GB 时
+    RTF 从 6 涨到 39，用户会误以为程序坏了）。这里直接把状况暴露给界面。
+    """
+    out = {"ram": None, "vram": None, "warning": ""}
+    try:
+        import ctypes
+
+        class _MS(ctypes.Structure):
+            _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_uint32),
+                        ("ullTotalPhys", ctypes.c_uint64), ("ullAvailPhys", ctypes.c_uint64),
+                        ("ullTotalPageFile", ctypes.c_uint64), ("ullAvailPageFile", ctypes.c_uint64),
+                        ("ullTotalVirtual", ctypes.c_uint64), ("ullAvailVirtual", ctypes.c_uint64),
+                        ("ullAvailExtendedVirtual", ctypes.c_uint64)]
+
+        m = _MS()
+        m.dwLength = ctypes.sizeof(m)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m)):
+            g = 2 ** 30
+            out["ram"] = {
+                "total_gb": round(m.ullTotalPhys / g, 1),
+                "avail_gb": round(m.ullAvailPhys / g, 1),
+                "percent": int(m.dwMemoryLoad),
+                "commit_avail_gb": round(m.ullAvailPageFile / g, 1),
+            }
+    except Exception:
+        pass
+
+    try:
+        import shutil as _sh
+        info = _sh.which("nvidia-smi")
+        if info:
+            r = subprocess.run(
+                [info, "--query-gpu=memory.used,memory.total,utilization.gpu",
+                 "--format=csv,noheader,nounits"],
+                capture_output=True, text=True, timeout=4)
+            if r.returncode == 0 and r.stdout.strip():
+                parts = [p.strip() for p in r.stdout.strip().splitlines()[0].split(",")]
+                used, total = int(parts[0]), int(parts[1])
+                out["vram"] = {
+                    "used_mb": used, "total_mb": total,
+                    "percent": int(used * 100 / total) if total else 0,
+                    "gpu_util": int(parts[2]) if len(parts) > 2 else None,
+                }
+    except Exception:
+        pass
+
+    # 给出人话提示
+    warns = []
+    ram = out.get("ram")
+    if ram:
+        # 阈值按实测调：提交内存耗尽时 G2PW onnx 会 "bad allocation"；
+        # 物理内存低于 4GB 时 RTF 会明显上升（8GB 卡实测从 6 涨到 39）。
+        if ram["commit_avail_gb"] < 3:
+            warns.append(f"提交内存只剩 {ram['commit_avail_gb']}GB，"
+                         f"合成可能失败（bad allocation），建议关掉一些程序")
+        elif ram["avail_gb"] < 4:
+            warns.append(f"物理内存只剩 {ram['avail_gb']}GB，合成会明显变慢")
+    vram = out.get("vram")
+    if vram and vram["percent"] > 80:
+        warns.append(f"显存已用 {vram['percent']}%（{vram['used_mb']}MB），"
+                     f"合成会明显变慢，关掉其他用 GPU 的程序可恢复")
+    out["warning"] = "；".join(warns)
+    return out
 
 
 @app.get("/api/history")
